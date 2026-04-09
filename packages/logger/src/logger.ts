@@ -7,45 +7,136 @@ import type { LoggerConfig, LogLevel, LogEntry } from "./types";
 import { LOG_LEVEL_VALUE } from "./types";
 
 /**
+ * Shared mutable state between a parent Logger and any scoped children
+ * created via withComponent(). Stored on the heap so all instances
+ * read the same correlation ID, CF properties, and log level at emit
+ * time — even if addContext() is called after withComponent().
+ */
+interface LoggerState {
+  logLevel: LogLevel;
+  correlationId?: string;
+  cfProperties: Record<string, unknown>;
+  contextEnriched: boolean;
+}
+
+/**
  * Structured logger for Cloudflare Workers.
  *
  * Emits JSON-formatted log entries enriched with Workers context
  * (CF properties, correlation IDs, cold start detection).
  */
 export class Logger extends PowertoolsBase {
-  private logLevel: LogLevel;
   private readonly persistentKeys: Record<string, unknown>;
   private temporaryKeys: Record<string, unknown> = {};
-  private correlationId?: string;
   private readonly debugSampleRate: number;
   private readonly logBufferingEnabled: boolean;
   private readonly buffer: LogEntry[] = [];
-  private contextEnriched = false;
-  private cfProperties: Record<string, unknown> = {};
   private readonly config: LoggerConfig;
+
+  /**
+   * Mutable request-level state. Shared with child loggers so that
+   * addContext() on the parent is immediately visible in all scoped
+   * children created via withComponent().
+   */
+  private readonly state: LoggerState;
+
+  /**
+   * Optional component name pre-tagged onto every log entry.
+   * Set via withComponent() rather than directly.
+   */
+  private readonly component?: string;
 
   constructor(config?: LoggerConfig) {
     super(config);
     this.config = config ?? {};
-    this.logLevel = config?.logLevel ?? "INFO";
     this.persistentKeys = { ...config?.persistentKeys };
     this.debugSampleRate = config?.debugSampleRate ?? 0;
     this.logBufferingEnabled = config?.logBufferingEnabled ?? false;
+    this.state = {
+      logLevel: config?.logLevel ?? "INFO",
+      cfProperties: {},
+      contextEnriched: false,
+    };
+  }
+
+  /**
+   * Returns a scoped child logger pre-tagged with a `component` field
+   * on every log entry. The child shares the parent's request context
+   * (correlation ID, CF properties, log level) so addContext() called
+   * on the parent is reflected in all children.
+   *
+   * Calling withComponent() on a child appends to the existing component
+   * path using " > " as a separator, up to a maximum depth of 5. This
+   * preserves the full call chain in the log output.
+   *
+   * Component names should be static module or class names, not runtime
+   * values — using dynamic strings (e.g. user IDs) will create unbounded
+   * cardinality in any log aggregation system.
+   *
+   * @example
+   * const repoLog = logger.withComponent("deckRepository");
+   * repoLog.info("deck persisted", { deckId });
+   * // { component: "deckRepository", message: "deck persisted", ... }
+   *
+   * const queryLog = repoLog.withComponent("query");
+   * queryLog.info("executing SQL");
+   * // { component: "deckRepository > query", message: "executing SQL", ... }
+   */
+  withComponent(component: string): Logger {
+    const SEPARATOR = " > ";
+    const MAX_DEPTH = 5;
+
+    // Build the new component path by appending to the parent's path.
+    const parentPath = this.component;
+    const parentDepth = parentPath ? parentPath.split(SEPARATOR).length : 0;
+
+    let childComponent: string;
+    if (!parentPath) {
+      childComponent = component;
+    } else if (parentDepth >= MAX_DEPTH) {
+      // Warn once and return this logger unchanged rather than silently
+      // truncating, so the caller knows the depth limit has been hit.
+      console.warn(
+        `[Logger] withComponent("${component}") ignored: maximum component depth of ${String(MAX_DEPTH)} reached. Current path: "${parentPath}"`,
+      );
+      return this;
+    } else {
+      childComponent = `${parentPath}${SEPARATOR}${component}`;
+    }
+
+    const child = new Logger(this.config);
+
+    // Point the child's state at the parent's state object so both
+    // instances read and write the same mutable request context.
+    (child as { state: LoggerState }).state = this.state;
+    (child as { component?: string }).component = childComponent;
+
+    // Child inherits the parent's persistent keys as a snapshot —
+    // keys added to the parent after this call are not inherited,
+    // which is the expected scoping behaviour.
+    Object.assign(child.persistentKeys, this.persistentKeys);
+
+    return child;
   }
 
   /**
    * Enrich the logger with context from the current request.
    * Should be called once per request at the start of the handler.
+   * Context is automatically shared with all children created via
+   * withComponent().
    */
   addContext(request: Request, _ctx?: ExecutionContext): void {
-    this.correlationId = extractCorrelationId(request, this.config.correlationIdConfig);
-    this.cfProperties = extractCfProperties(request);
-    this.contextEnriched = true;
+    this.state.correlationId = extractCorrelationId(
+      request,
+      this.config.correlationIdConfig,
+    );
+    this.state.cfProperties = extractCfProperties(request);
+    this.state.contextEnriched = true;
 
     // Apply debug sampling: randomly elevate log level for a
     // percentage of requests to capture detailed diagnostics.
     if (this.debugSampleRate > 0 && Math.random() < this.debugSampleRate) {
-      this.logLevel = "DEBUG";
+      this.state.logLevel = "DEBUG";
     }
   }
 
@@ -118,12 +209,15 @@ export class Logger extends PowertoolsBase {
       service: this.serviceName,
       ...this.persistentKeys,
       ...this.temporaryKeys,
-      ...(this.correlationId ? { correlation_id: this.correlationId } : {}),
-      ...(this.contextEnriched ? this.cfProperties : {}),
+      // component is inserted after persistentKeys so it cannot be
+      // accidentally overwritten by caller-supplied persistent state.
+      ...(this.component ? { component: this.component } : {}),
+      ...(this.state.correlationId ? { correlation_id: this.state.correlationId } : {}),
+      ...(this.state.contextEnriched ? this.state.cfProperties : {}),
       ...extra,
     };
 
-    if (LOG_LEVEL_VALUE[level] < LOG_LEVEL_VALUE[this.logLevel]) {
+    if (LOG_LEVEL_VALUE[level] < LOG_LEVEL_VALUE[this.state.logLevel]) {
       // Below threshold: buffer if enabled, otherwise discard.
       if (this.logBufferingEnabled) {
         this.buffer.push(entry);
