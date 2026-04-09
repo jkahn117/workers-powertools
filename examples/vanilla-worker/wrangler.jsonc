@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vanilla-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-08",
+
+  // Enable Workers Logs — structured JSON output from the logger is
+  // queryable via the dashboard and API.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      // Lower this for high-traffic workers to manage cost.
+      "head_sampling_rate": 1,
+    },
+  },
+
+  // The logger and tracer need no bindings.
+  // Metrics requires an Analytics Engine dataset binding.
+  // Idempotency requires a KV namespace (or D1 database).
+
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "vanilla_worker_metrics",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "IDEMPOTENCY_KV",
+      "id": "<KV_NAMESPACE_ID>",
+    },
+  ],
+}

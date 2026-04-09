@@ -1,0 +1,42 @@
+{
+  "name": "@workers-powertools/hono",
+  "version": "0.0.0",
+  "description": "Hono middleware adapters for Workers Powertools (logger, metrics, tracer, idempotency)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "peerDependencies": {
+    "@workers-powertools/commons": "workspace:*",
+    "@workers-powertools/idempotency": "workspace:*",
+    "@workers-powertools/logger": "workspace:*",
+    "@workers-powertools/metrics": "workspace:*",
+    "@workers-powertools/tracer": "workspace:*",
+    "hono": "^4.12.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@workers-powertools/commons": "workspace:*",
+    "@workers-powertools/idempotency": "workspace:*",
+    "@workers-powertools/logger": "workspace:*",
+    "@workers-powertools/metrics": "workspace:*",
+    "@workers-powertools/tracer": "workspace:*",
+    "hono": "^4.12.12"
+  }
+}

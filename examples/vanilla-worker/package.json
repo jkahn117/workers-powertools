@@ -1,0 +1,24 @@
+{
+  "name": "vanilla-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@workers-powertools/logger": "workspace:*",
+    "@workers-powertools/metrics": "workspace:*",
+    "@workers-powertools/tracer": "workspace:*",
+    "@workers-powertools/idempotency": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "^4.81.0"
+  }
+}

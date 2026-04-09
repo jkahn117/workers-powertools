@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "examples/*"
+
+catalog:
+  "@cloudflare/workers-types": "^4.20260408.1"
+  "@cloudflare/vitest-pool-workers": "^0.14.2"
+  "vitest": "^4.1.3"

@@ -1,0 +1,28 @@
+{
+  "name": "@workers-powertools/commons",
+  "version": "0.0.0",
+  "description": "Shared types, utilities, and base classes for Workers Powertools",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

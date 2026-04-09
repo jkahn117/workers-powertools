@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hono-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-08",
+
+  // Enable Workers Logs — structured JSON output from the logger is
+  // queryable via the dashboard and API.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      // Lower this for high-traffic workers to manage cost.
+      "head_sampling_rate": 1,
+    },
+  },
+
+  // The Hono middleware adapters use the same bindings as the core utilities.
+  // injectMetrics() needs ANALYTICS; injectIdempotency() needs IDEMPOTENCY_KV.
+
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "hono_worker_metrics",
+    },
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "IDEMPOTENCY_KV",
+      "id": "<KV_NAMESPACE_ID>",
+    },
+  ],
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@workers-powertools/idempotency",
+  "version": "0.0.0",
+  "description": "Exactly-once execution with pluggable persistence for Cloudflare Workers",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./kv": {
+      "types": "./dist/kv.d.ts",
+      "import": "./dist/kv.js"
+    },
+    "./d1": {
+      "types": "./dist/d1.d.ts",
+      "import": "./dist/d1.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@workers-powertools/commons": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

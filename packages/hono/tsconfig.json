@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../commons" },
+    { "path": "../logger" },
+    { "path": "../metrics" },
+    { "path": "../tracer" },
+    { "path": "../idempotency" }
+  ]
+}
