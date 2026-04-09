@@ -3,7 +3,13 @@ import {
   extractCorrelationId,
   extractCfProperties,
 } from "@workers-powertools/commons";
-import type { LoggerConfig, LogLevel, LogEntry } from "./types";
+import type {
+  LoggerConfig,
+  LogLevel,
+  LogEntry,
+  RpcContext,
+  RpcContextHandle,
+} from "./types";
 import { LOG_LEVEL_VALUE } from "./types";
 
 /**
@@ -108,8 +114,8 @@ export class Logger extends PowertoolsBase {
 
     // Point the child's state at the parent's state object so both
     // instances read and write the same mutable request context.
-    (child as { state: LoggerState }).state = this.state;
-    (child as { component?: string }).component = childComponent;
+    (child as unknown as { state: LoggerState }).state = this.state;
+    (child as unknown as { component?: string }).component = childComponent;
 
     // Child inherits the parent's persistent keys as a snapshot —
     // keys added to the parent after this call are not inherited,
@@ -153,6 +159,70 @@ export class Logger extends PowertoolsBase {
   /** Clear temporary keys (call between requests if reusing the logger). */
   clearTemporaryKeys(): void {
     this.temporaryKeys = {};
+  }
+
+  /**
+   * Enriches the logger with context for a Durable Object or WorkerEntrypoint
+   * RPC method invocation, where no Request object is available.
+   *
+   * Returns a disposable handle that clears the RPC context when disposed.
+   * Use with the `using` keyword for automatic cleanup on scope exit —
+   * including early returns and thrown exceptions — so the finally cleanup
+   * is never forgotten.
+   *
+   * @example
+   * // Plain Durable Object — correlationId passed explicitly via RPC args
+   * async generateSlides(prompt: string, correlationId: string) {
+   *   using _ctx = logger.withRpcContext({
+   *     correlationId,
+   *     agent: "SlideBuilder",
+   *     operation: "generateSlides",
+   *   });
+   *   logger.info("generating slides", { prompt });
+   * }
+   *
+   * @example
+   * // WorkerEntrypoint — same pattern
+   * async processItem(item: Item, correlationId: string) {
+   *   using _ctx = logger.withRpcContext({
+   *     correlationId,
+   *     agent: "ItemProcessor",
+   *     operation: "processItem",
+   *   });
+   *   logger.info("processing item", { itemId: item.id });
+   * }
+   */
+  withRpcContext(context: RpcContext): RpcContextHandle {
+    const keys: Record<string, unknown> = {};
+
+    if (context.correlationId) {
+      // Set on shared state so all children (withComponent etc.) see it too.
+      this.state.correlationId = context.correlationId;
+    }
+    if (context.agent) {
+      keys["agent"] = context.agent;
+    }
+    if (context.operation) {
+      keys["operation"] = context.operation;
+    }
+    if (context.instanceId) {
+      keys["instance_id"] = context.instanceId;
+    }
+    if (context.extra) {
+      Object.assign(keys, context.extra);
+    }
+
+    this.appendTemporaryKeys(keys);
+
+    return {
+      [Symbol.dispose]: () => {
+        this.clearTemporaryKeys();
+        // Clear the correlation ID set for this RPC invocation.
+        if (context.correlationId) {
+          this.state.correlationId = undefined;
+        }
+      },
+    };
   }
 
   trace(message: string, extra?: Record<string, unknown>): void {

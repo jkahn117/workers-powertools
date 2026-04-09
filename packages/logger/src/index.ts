@@ -6,4 +6,10 @@
  */
 
 export { Logger } from "./logger";
-export type { LoggerConfig, LogLevel, LogEntry } from "./types";
+export type {
+  LoggerConfig,
+  LogLevel,
+  LogEntry,
+  RpcContext,
+  RpcContextHandle,
+} from "./types";
