@@ -24,6 +24,8 @@ A developer toolkit for observability and reliability best practices for Cloudfl
 
 ### Logger
 
+#### Basic usage — Workers fetch handler
+
 ```typescript
 import { Logger } from "@workers-powertools/logger";
 
@@ -35,7 +37,7 @@ const logger = new Logger({
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    logger.addContext(request, ctx);
+    logger.addContext(request, ctx); // enriches with CF properties + correlation ID
 
     logger.info("Processing request", { path: new URL(request.url).pathname });
 
@@ -67,7 +69,144 @@ Output:
 }
 ```
 
+#### Scoping with `withComponent()` — module-level sub-loggers
+
+Use `withComponent()` to create a named sub-logger for a module, class, or layer. Call it **once at module scope** — the child shares the parent's request context (correlation ID, CF properties) so `addContext()` on the parent is immediately reflected in all children.
+
+```typescript
+// deckRepository.ts
+import { logger } from "./logger"; // shared module-level logger
+
+const repoLog = logger.withComponent("deckRepository");
+// Nesting composes automatically with " > " separator, max depth 5:
+const queryLog = repoLog.withComponent("query");
+
+export async function getDeck(id: string) {
+  repoLog.info("fetching deck", { deckId: id });
+  // { component: "deckRepository", message: "fetching deck", ... }
+
+  queryLog.info("executing SQL");
+  // { component: "deckRepository > query", message: "executing SQL", ... }
+}
+```
+
+#### Scoping with `child()` — per-invocation isolation
+
+Use `child()` when you need **isolated context per call** — particularly inside Durable Object RPC methods, where a single logger instance handles concurrent calls. Unlike `appendTemporaryKeys()`, `child()` returns a new Logger with its own independent key store and state, so concurrent calls cannot clobber each other's context.
+
+```typescript
+import { DurableObject } from "cloudflare:workers";
+import { Logger } from "@workers-powertools/logger";
+
+const logger = new Logger({ serviceName: "slide-builder" });
+// Module-level component scoping (shared, safe):
+const doLog = logger.withComponent("SlideBuilder");
+
+export class SlideBuilder extends DurableObject {
+  async generateSlides(prompt: string, correlationId: string) {
+    // Per-invocation child — isolated, no shared mutation:
+    const log = doLog.child({
+      correlation_id: correlationId,
+      operation: "generateSlides",
+    });
+
+    log.info("generating slides", { prompt });
+    // { component: "SlideBuilder", correlation_id: "req-123",
+    //   operation: "generateSlides", message: "generating slides" }
+
+    // Concurrent calls each get their own `log` — no bleed-through
+  }
+
+  async onAlarm() {
+    const log = doLog.child({ operation: "onAlarm" });
+    log.info("alarm fired");
+  }
+}
+```
+
+> **Why not `appendTemporaryKeys()`?** In a Durable Object, multiple RPC calls can execute concurrently on the same instance. `appendTemporaryKeys` mutates the shared logger, so Call A's keys bleed into Call B's log entries and `clearTemporaryKeys()` in one call's `finally` block silently wipes the other's context. `child()` avoids this entirely — each call gets its own logger with no shared mutable state.
+
+#### Scoping with `withRpcContext()` — explicit RPC context with auto-cleanup
+
+Use `withRpcContext()` when you need to set context on the **shared logger** for the duration of an RPC call and want guaranteed cleanup via the `using` keyword (TC39 explicit resource management). Best for WorkerEntrypoints and plain DOs where you accept the single-call-at-a-time constraint.
+
+```typescript
+import { WorkerEntrypoint } from "cloudflare:workers";
+import { Logger } from "@workers-powertools/logger";
+
+const logger = new Logger({ serviceName: "item-processor" });
+
+export class ItemProcessor extends WorkerEntrypoint {
+  async processItem(item: Item, correlationId: string) {
+    using _ctx = logger.withRpcContext({
+      correlationId,
+      agent: "ItemProcessor",
+      operation: "processItem",
+    });
+    // Cleanup is guaranteed on scope exit, even on throw
+    logger.info("processing item", { itemId: item.id });
+  }
+}
+```
+
+#### Scoping with `injectAgentContext()` — Agents SDK integration
+
+Use `injectAgentContext()` from `@workers-powertools/agents` inside Agents SDK methods. It calls `getCurrentAgent()` internally to resolve agent name and connection ID automatically — no need to thread `this` or pass extra parameters.
+
+```typescript
+import { Agent } from "agents";
+import { Logger } from "@workers-powertools/logger";
+import { Tracer } from "@workers-powertools/tracer";
+import { injectAgentContext } from "@workers-powertools/agents";
+
+const logger = new Logger({ serviceName: "slide-builder" });
+const tracer = new Tracer({ serviceName: "slide-builder" });
+const agentLog = logger.withComponent("SlideBuilder");
+
+export class SlideBuilder extends Agent<Env> {
+  async generateSlides(prompt: string, correlationId?: string) {
+    // agent name, connection ID resolved automatically from getCurrentAgent()
+    const log = agentLog.child(
+      injectAgentContext({
+        logger: agentLog,
+        tracer,
+        operation: "generateSlides",
+        correlationId,
+      }).correlationId
+        ? { correlation_id: correlationId! }
+        : {},
+    );
+    // Or more simply, use injectAgentContext directly:
+    using _ctx = injectAgentContext({
+      logger: agentLog,
+      tracer,
+      operation: "generateSlides",
+      correlationId,
+    });
+
+    agentLog.info("generating slides", { prompt });
+    // { component: "SlideBuilder", agent: "slide-builder-instance",
+    //   operation: "generateSlides", connection_id: "conn_abc",
+    //   correlation_id: "req-123", ... }
+  }
+}
+```
+
+#### Summary: which scoping method to use
+
+| Scenario                                    | Method                      | Why                                                                              |
+| ------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------- |
+| Module/class sub-logger, created once       | `withComponent()`           | Shares parent request context; component path composed automatically             |
+| Concurrent DO RPC calls                     | `child()`                   | Fully isolated state — concurrent calls can't clobber each other                 |
+| Single-threaded RPC with guaranteed cleanup | `withRpcContext()`          | Works with `using` for automatic cleanup; sets context on shared logger          |
+| Agents SDK methods                          | `injectAgentContext()`      | Resolves agent name + connection ID automatically via `getCurrentAgent()`        |
+| Hono route handlers                         | `injectLogger()` middleware | Context injected automatically; `clearTemporaryKeys()` called after each request |
+
 ### Metrics
+
+#### Buffered mode — Worker fetch handlers
+
+The default. Metrics are queued and written together after the response is sent, so they never add latency to the request.
 
 ```typescript
 import { Metrics, MetricUnit } from "@workers-powertools/metrics";
@@ -89,11 +228,78 @@ export default {
     metrics.addMetric("orderLatency", MetricUnit.Milliseconds, Date.now() - start);
     metrics.addMetric("orderValue", MetricUnit.None, result.total);
 
+    // Non-blocking — writes happen after the response is returned
     ctx.waitUntil(metrics.flush());
     return new Response(JSON.stringify(result));
   },
 };
 ```
+
+#### `flushSync()` — Durable Object RPC methods with ExecutionContext
+
+When you have `this.ctx` available in a DO, you can pass it to `waitUntil`. If you don't, call `flushSync()` directly — `writeDataPoint()` is fire-and-forget on the Analytics Engine binding and does not block.
+
+```typescript
+import { DurableObject } from "cloudflare:workers";
+import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+
+const metrics = new Metrics({ namespace: "slide-builder", serviceName: "api" });
+
+export class SlideBuilder extends DurableObject {
+  async generateSlides(prompt: string) {
+    metrics.setBinding(this.env.ANALYTICS);
+    metrics.addMetric("slidesGenerated", MetricUnit.Count, 1);
+
+    const result = await buildSlides(prompt);
+
+    metrics.addMetric("slideCount", MetricUnit.None, result.slides.length);
+
+    // Option A: if this.ctx is available
+    this.ctx.waitUntil(metrics.flush());
+
+    // Option B: if ctx is not available — writeDataPoint() is sync under the hood
+    metrics.flushSync();
+
+    return result;
+  }
+}
+```
+
+#### `autoFlush: true` — alarm handlers and queue consumers
+
+When there is no `ExecutionContext` at all (scheduled alarms, queue callbacks in some configurations), set `autoFlush: true`. Each metric is written immediately on `addMetric()` — no explicit flush call needed, ever.
+
+```typescript
+import { DurableObject } from "cloudflare:workers";
+import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+
+// autoFlush: true — safe for any context including alarm handlers
+const metrics = new Metrics({
+  namespace: "slide-builder",
+  serviceName: "api",
+  autoFlush: true,
+});
+
+export class SlideBuilder extends DurableObject {
+  async alarm() {
+    metrics.setBinding(this.env.ANALYTICS);
+    metrics.addMetric("alarmFired", MetricUnit.Count, 1); // written immediately
+    await runScheduledCleanup();
+    metrics.addMetric("cleanupComplete", MetricUnit.Count, 1); // written immediately
+    // No flush() call needed
+  }
+}
+```
+
+> **Which mode to use:**
+> | Context | Mode | Call |
+> |---|---|---|
+> | Worker fetch handler | Buffered (default) | `ctx.waitUntil(metrics.flush())` |
+> | DO RPC with `this.ctx` available | Buffered | `this.ctx.waitUntil(metrics.flush())` |
+> | DO RPC without ctx | Buffered | `metrics.flushSync()` |
+> | DO alarm / queue consumer | Auto-flush | `autoFlush: true`, no flush call needed |
+
+````
 
 ### Tracer
 
@@ -120,7 +326,7 @@ export default {
     return new Response(JSON.stringify(result));
   },
 };
-```
+````
 
 ### Idempotency
 

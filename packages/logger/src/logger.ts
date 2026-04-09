@@ -126,6 +126,60 @@ export class Logger extends PowertoolsBase {
   }
 
   /**
+   * Returns a new Logger instance with the provided keys merged into its
+   * persistent keys, inheriting the parent's current persistent keys and
+   * component path as a snapshot.
+   *
+   * Unlike appendTemporaryKeys(), this method is safe for concurrent use
+   * in Durable Objects: each child has its own isolated key store and its
+   * own state object (correlationId, logLevel, CF properties), so
+   * concurrent RPC calls cannot mutate each other's context.
+   *
+   * Use this as the primary way to scope a logger for a single RPC
+   * invocation or sub-operation, rather than mutating the shared parent.
+   *
+   * @example
+   * // In a DO RPC method — each concurrent call gets its own isolated logger
+   * async generateSlides(prompt: string, correlationId: string) {
+   *   const log = logger.child({
+   *     correlation_id: correlationId,
+   *     operation: "generateSlides",
+   *   });
+   *   log.info("generating slides", { prompt });
+   *   // Concurrent calls cannot clobber each other's correlation_id
+   * }
+   *
+   * @example
+   * // With component scoping — child() and withComponent() compose naturally
+   * const log = logger
+   *   .withComponent("deckService")
+   *   .child({ requestId: "abc", userId: "u-123" });
+   */
+  child(extraKeys: Record<string, unknown>): Logger {
+    const childLogger = new Logger(this.config);
+
+    // The child gets its own independent state — not a reference to the
+    // parent's. This is the critical difference from withComponent().
+    // Each concurrent RPC call can set its own correlationId without
+    // affecting siblings.
+    (childLogger as unknown as { state: LoggerState }).state = {
+      logLevel: this.state.logLevel,
+      correlationId: this.state.correlationId,
+      cfProperties: { ...this.state.cfProperties },
+      contextEnriched: this.state.contextEnriched,
+    };
+
+    // Inherit the parent's component path.
+    (childLogger as unknown as { component?: string }).component = this.component;
+
+    // Merge: parent persistent keys (snapshot) + extra keys passed by caller.
+    // Extra keys take precedence, allowing callers to override inherited values.
+    Object.assign(childLogger.persistentKeys, this.persistentKeys, extraKeys);
+
+    return childLogger;
+  }
+
+  /**
    * Enrich the logger with context from the current request.
    * Should be called once per request at the start of the handler.
    * Context is automatically shared with all children created via

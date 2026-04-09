@@ -78,8 +78,44 @@ Based on the analysis above, v1 focuses on the four highest-impact, most portabl
 - **Debug log sampling** -- Probabilistic log level elevation (e.g., "emit DEBUG-level logs for 1% of requests, INFO for the rest"). This is distinct from wrangler's `head_sampling_rate`, which controls whether a request is logged _at all_. Debug sampling controls _verbosity_ per request ✓
 - **`POWERTOOLS_LOG_LEVEL` env-var control** -- _(not yet implemented; log level must be set in constructor for now)_
 - **`cf-ray` in log output** -- _(not yet implemented; `cf-ray` is used for correlation ID extraction but is not yet added as a log field)_
-- **Child loggers** -- Scoped loggers for sub-operations that inherit parent context _(deferred to v2)_
+- **Scoped child loggers** -- Three complementary scoping mechanisms for different contexts ✓ (see below)
 - **Custom formatters** -- Bring your own log format for compatibility with existing log pipelines _(deferred to v2)_
+
+#### Logger Scoping Mechanisms
+
+Workers have a fundamentally different concurrency model from Lambda. A single Durable Object instance can handle concurrent RPC calls, each of which needs isolated log context. `appendTemporaryKeys()` alone is unsafe in this model — it mutates shared state, so concurrent calls clobber each other's context and `clearTemporaryKeys()` in one call's `finally` silently wipes another call's in-flight context.
+
+Three scoping mechanisms address this, each suited to a different callsite:
+
+**`withComponent(name)`** — module-level sub-logger, created once at startup. Shares the parent's mutable request state (correlation ID, CF properties, log level) so `addContext()` called on the parent is immediately visible in all children. Component names compose with `>` separator up to a depth of 5. Safe at module scope; not safe for concurrent per-invocation use.
+
+```typescript
+// Created once — safe
+const repoLog = logger.withComponent("deckRepository");
+const queryLog = repoLog.withComponent("query");
+// { component: "deckRepository > query", ... }
+```
+
+**`child(extraKeys)`** — per-invocation logger with fully isolated state. Returns a new Logger instance that snapshots the parent's persistent keys and state at the moment of creation. Each concurrent RPC call gets its own child with its own `correlationId`, `logLevel`, and key store — mutations on one child are invisible to all others. This is the correct primitive for Durable Objects.
+
+```typescript
+// Inside a DO RPC method — each concurrent call is isolated
+async generateSlides(prompt: string, correlationId: string) {
+  const log = doLog.child({ correlation_id: correlationId, operation: "generateSlides" });
+  log.info("generating slides");
+  // No cleanup needed — log is a local variable, GC'd on method return
+}
+```
+
+**`withRpcContext(context)`** — sets context on the shared logger and returns a `Symbol.dispose`-compatible handle for use with the `using` keyword. Appropriate for WorkerEntrypoints or plain DOs that are known to be single-threaded (one call at a time). Unsafe for concurrent DO RPC calls; use `child()` instead.
+
+```typescript
+async processItem(item: Item, correlationId: string) {
+  using _ctx = logger.withRpcContext({ correlationId, agent: "ItemProcessor", operation: "processItem" });
+  logger.info("processing item");
+  // Cleanup guaranteed on scope exit, even on throw
+}
+```
 
 ### Approach
 

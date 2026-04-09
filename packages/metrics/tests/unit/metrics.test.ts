@@ -91,3 +91,76 @@ describe("Metrics / flush", () => {
     );
   });
 });
+
+describe("Metrics / flushSync", () => {
+  it("writes buffered entries synchronously", () => {
+    const binding = makeAnalyticsBinding();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBinding(binding as unknown as AnalyticsEngineDataset);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    metrics.addMetric("latency", MetricUnit.Milliseconds, 42);
+    metrics.flushSync();
+
+    expect(binding.writeDataPoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears entries after flushSync", () => {
+    const binding = makeAnalyticsBinding();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBinding(binding as unknown as AnalyticsEngineDataset);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    metrics.flushSync();
+    metrics.flushSync(); // second call should be a no-op
+
+    expect(binding.writeDataPoint).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns when no binding is set", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.addMetric("x", MetricUnit.None, 1);
+
+    metrics.flushSync();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No Analytics Engine binding"),
+    );
+  });
+});
+
+describe("Metrics / autoFlush", () => {
+  it("writes each metric immediately on addMetric()", () => {
+    const binding = makeAnalyticsBinding();
+    const metrics = new Metrics({
+      namespace: "ns",
+      serviceName: "svc",
+      autoFlush: true,
+    });
+    metrics.setBinding(binding as unknown as AnalyticsEngineDataset);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    expect(binding.writeDataPoint).toHaveBeenCalledTimes(1);
+
+    metrics.addMetric("latency", MetricUnit.Milliseconds, 42);
+    expect(binding.writeDataPoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("flush() is a no-op in autoFlush mode", async () => {
+    const binding = makeAnalyticsBinding();
+    const metrics = new Metrics({
+      namespace: "ns",
+      serviceName: "svc",
+      autoFlush: true,
+    });
+    metrics.setBinding(binding as unknown as AnalyticsEngineDataset);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    await metrics.flush(); // should not double-write
+
+    expect(binding.writeDataPoint).toHaveBeenCalledTimes(1);
+  });
+
+  it.todo("warns on addMetric() when binding not yet set in autoFlush mode");
+});
