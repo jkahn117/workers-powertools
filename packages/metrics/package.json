@@ -1,7 +1,7 @@
 {
   "name": "@workers-powertools/metrics",
   "version": "0.0.0",
-  "description": "Custom metrics via Analytics Engine for Cloudflare Workers",
+  "description": "Named business metrics for Cloudflare Workers — Pipelines backend (default) or Analytics Engine (opt-in)",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

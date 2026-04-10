@@ -24,8 +24,30 @@ export class Tracer extends PowertoolsBase {
   /**
    * Enrich the tracer with context from the current request.
    * Extracts or generates a correlation ID.
+   *
+   * Pass the Workers `env` object as the third argument to apply
+   * runtime configuration from environment variables:
+   *   - POWERTOOLS_SERVICE_NAME — overrides the constructor serviceName
+   *
+   * @example
+   * export default {
+   *   async fetch(request, env, ctx) {
+   *     tracer.addContext(request, ctx, env);
+   *   }
+   * }
    */
-  addContext(request: Request, _ctx?: ExecutionContext): void {
+  addContext(
+    request: Request,
+    _ctx?: ExecutionContext,
+    env?: Record<string, unknown>,
+  ): void {
+    if (env && !this.config.serviceName) {
+      const envService = env["POWERTOOLS_SERVICE_NAME"];
+      if (typeof envService === "string" && envService) {
+        (this as unknown as { serviceName: string }).serviceName = envService;
+      }
+    }
+
     this.correlationId = extractCorrelationId(request, this.config.correlationIdConfig);
   }
 

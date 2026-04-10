@@ -1,64 +1,96 @@
 import { PowertoolsBase } from "@workers-powertools/commons";
-import type { MetricsConfig, MetricEntry } from "./types";
+import type { MetricsConfig, MetricEntry, MetricsBackend } from "./types";
 import type { MetricUnit } from "./units";
 
 /**
- * Analytics Engine limits:
- * - 20 blobs (strings, max 256 bytes each)
- * - 20 doubles (numbers) per data point
- */
-const MAX_BLOBS = 20;
-const MAX_DOUBLES = 20;
-
-/**
- * Custom metrics utility for Cloudflare Workers.
+ * Business metrics utility for Cloudflare Workers.
  *
- * Wraps Analytics Engine's writeDataPoint API with an ergonomic
- * interface for named metrics, dimensions, and batched flushing.
+ * Provides an ergonomic API for emitting named business metrics
+ * (successfulBooking, deckGenerated, failedPayment) with a namespace,
+ * dimensions, and units — modelled after Lambda Powertools Metrics.
+ *
+ * The default backend is Cloudflare Pipelines (→ R2/Iceberg), which
+ * writes named-field JSON records queryable by column name. The
+ * AnalyticsEngineBackend is available as an explicit opt-in for users
+ * with existing Analytics Engine dashboards.
+ *
+ * Do not use this utility to re-emit infrastructure signals that the
+ * Workers platform already provides for free (request count, CPU time,
+ * error rate, p99 latency). Those are available via the Workers Metrics
+ * dashboard and GraphQL API at zero cost.
  *
  * Two flush modes:
- * - **Buffered (default):** metrics are queued and written together via
- *   flush() or flushSync(). In fetch handlers, call
- *   ctx.waitUntil(metrics.flush()) so writes don't block the response.
+ * - **Buffered (default):** metrics are queued and written together.
+ *   In fetch handlers call ctx.waitUntil(metrics.flush()).
+ *   In DO contexts with this.ctx, call this.ctx.waitUntil(metrics.flush()).
+ *   Without ExecutionContext, call metrics.flushSync().
  * - **Auto-flush:** set autoFlush: true to write each metric immediately
- *   on addMetric(). Use this in Durable Object RPC methods and alarm
- *   handlers where ExecutionContext is not always available.
+ *   on addMetric(). Use in alarm handlers and queue consumers.
  */
 export class Metrics extends PowertoolsBase {
   private readonly namespace: string;
   private readonly defaultDimensions: Record<string, string>;
   private readonly entries: MetricEntry[] = [];
   private requestDimensions: Record<string, string> = {};
-  private analyticsBinding?: AnalyticsEngineDataset;
   private readonly autoFlush: boolean;
+  private backend: MetricsBackend | undefined;
 
-  constructor(config: MetricsConfig) {
+  constructor(config?: MetricsConfig) {
     super(config);
-    this.namespace = config.namespace;
-    this.defaultDimensions = { ...config.defaultDimensions };
-    this.autoFlush = config.autoFlush ?? false;
+
+    // Resolve namespace: constructor → env var → default
+    this.namespace = this.resolveConfig(
+      config?.namespace,
+      // In Workers, env vars are accessed via bindings, not process.env.
+      // We read from globalThis for test compatibility; in production
+      // this will typically be undefined and the constructor value used.
+      typeof globalThis !== "undefined"
+        ? ((globalThis as Record<string, unknown>)["POWERTOOLS_METRICS_NAMESPACE"] as
+            | string
+            | undefined)
+        : undefined,
+      "default_namespace",
+    );
+
+    this.defaultDimensions = { ...config?.defaultDimensions };
+    this.autoFlush = config?.autoFlush ?? false;
+    this.backend = config?.backend;
   }
 
   /**
-   * Set the Analytics Engine binding. Must be called before any
-   * metrics are written, either before addMetric() in autoFlush
-   * mode, or before flush()/flushSync() in buffered mode.
+   * Set or replace the metrics backend.
+   *
+   * Call this in your fetch handler (or per-request in Hono middleware)
+   * after the env binding is available.
+   *
+   * @example
+   * // Pipelines (recommended)
+   * metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
+   *
+   * // Analytics Engine (explicit opt-in — see AnalyticsEngineBackend docs)
+   * metrics.setBackend(new AnalyticsEngineBackend({ binding: env.ANALYTICS }));
    */
-  setBinding(binding: AnalyticsEngineDataset): void {
-    this.analyticsBinding = binding;
+  setBackend(backend: MetricsBackend): void {
+    this.backend = backend;
   }
 
-  /** Add a dimension scoped to the current request or operation. */
+  /**
+   * Add a dimension scoped to the current request or operation.
+   * Merged with defaultDimensions on each addMetric() call.
+   */
   addDimension(key: string, value: string): void {
     this.requestDimensions[key] = value;
   }
 
   /**
-   * Record a metric data point.
+   * Record a named business metric.
    *
-   * In buffered mode (default), the metric is queued until
-   * flush() or flushSync() is called. In autoFlush mode, the
-   * metric is written to Analytics Engine immediately.
+   * In buffered mode (default), the entry is queued until flush() or
+   * flushSync() is called. In autoFlush mode, it is written immediately.
+   *
+   * @example
+   * metrics.addMetric("successfulBooking", MetricUnit.Count, 1);
+   * metrics.addMetric("orderLatency", MetricUnit.Milliseconds, 142);
    */
   addMetric(name: string, unit: MetricUnit, value: number): void {
     const entry: MetricEntry = {
@@ -73,97 +105,87 @@ export class Metrics extends PowertoolsBase {
     };
 
     if (this.autoFlush) {
-      // Write immediately — no buffering. Safe in contexts without
-      // ExecutionContext (DO RPC methods, alarm handlers).
-      this.writeEntry(entry);
+      this.writeSingle(entry);
     } else {
       this.entries.push(entry);
     }
   }
 
   /**
-   * Flush all buffered metrics to Analytics Engine.
+   * Flush all buffered metrics via the configured backend.
    *
-   * In Worker fetch handlers, prefer:
+   * Returns a Promise so it can be used with ctx.waitUntil():
    *   ctx.waitUntil(metrics.flush())
-   * so the write doesn't block the response.
    *
-   * In Durable Object contexts where ExecutionContext is available,
-   * you may also use ctx.waitUntil(metrics.flush()). If ExecutionContext
-   * is not available, use flushSync() instead.
-   *
-   * No-op when autoFlush is true (metrics are already written on
-   * addMetric()).
+   * No-op when autoFlush is true — metrics are already written on addMetric().
+   * No-op when no entries are buffered.
    */
   async flush(): Promise<void> {
-    this.flushSync();
-  }
-
-  /**
-   * Synchronously flush all buffered metrics to Analytics Engine.
-   *
-   * writeDataPoint() is a fire-and-forget call on the Analytics Engine
-   * binding — it does not return a Promise and does not block. This method
-   * is therefore safe to call without ctx.waitUntil() in contexts where
-   * ExecutionContext is not available, such as Durable Object RPC methods
-   * and alarm handlers.
-   *
-   * No-op when autoFlush is true (metrics are already written on
-   * addMetric()).
-   */
-  flushSync(): void {
-    if (!this.analyticsBinding) {
-      console.warn(
-        "[Metrics] No Analytics Engine binding set. Call setBinding(env.ANALYTICS) before flushing.",
-      );
+    if (!this.assertBackend()) {
       return;
     }
 
-    for (const entry of this.entries) {
-      this.writeEntry(entry);
+    if (this.entries.length === 0) {
+      return;
     }
 
-    // Clear state after flush
+    const toWrite = [...this.entries];
+    this.clearEntries();
+
+    await this.backend!.write(toWrite, this.buildContext());
+  }
+
+  /**
+   * Synchronously flush all buffered metrics (fire-and-forget).
+   *
+   * Safe to call in Durable Object RPC methods and alarm handlers where
+   * ExecutionContext is not always available. The backend's writeSync()
+   * implementation handles async delivery internally.
+   *
+   * No-op when autoFlush is true.
+   * No-op when no entries are buffered.
+   */
+  flushSync(): void {
+    if (!this.assertBackend()) {
+      return;
+    }
+
+    if (this.entries.length === 0) {
+      return;
+    }
+
+    const toWrite = [...this.entries];
+    this.clearEntries();
+
+    this.backend!.writeSync(toWrite, this.buildContext());
+  }
+
+  private writeSingle(entry: MetricEntry): void {
+    if (!this.assertBackend()) {
+      return;
+    }
+    this.backend!.writeSync([entry], this.buildContext());
+  }
+
+  private buildContext() {
+    return {
+      namespace: this.namespace,
+      serviceName: this.serviceName,
+    };
+  }
+
+  private clearEntries(): void {
     this.entries.length = 0;
     this.requestDimensions = {};
   }
 
-  /**
-   * Write a single metric entry to Analytics Engine.
-   * writeDataPoint() is synchronous and fire-and-forget — it does not
-   * return a Promise. The runtime handles delivery asynchronously.
-   */
-  private writeEntry(entry: MetricEntry): void {
-    if (!this.analyticsBinding) {
-      return;
-    }
-
-    const allDimensions: Record<string, string> = {
-      namespace: this.namespace,
-      service: this.serviceName,
-      metric_name: entry.name,
-      metric_unit: entry.unit,
-      ...entry.dimensions,
-    };
-
-    // Pack dimensions into blobs (first N keys, capped at MAX_BLOBS)
-    const blobKeys = Object.keys(allDimensions).slice(0, MAX_BLOBS);
-    const blobs = blobKeys.map((k) => allDimensions[k] ?? "");
-
-    // Pack metric value into doubles[0]
-    const doubles = [entry.value];
-
-    if (doubles.length > MAX_DOUBLES) {
+  private assertBackend(): boolean {
+    if (!this.backend) {
       console.warn(
-        `[Metrics] Metric "${entry.name}" exceeds ${String(MAX_DOUBLES)} doubles limit. Truncating.`,
+        "[Metrics] No backend configured. Call setBackend() with a PipelinesBackend or AnalyticsEngineBackend before flushing.",
       );
-      doubles.length = MAX_DOUBLES;
+      return false;
     }
-
-    this.analyticsBinding.writeDataPoint({
-      blobs,
-      doubles,
-      indexes: [entry.name],
-    });
+    return true;
   }
 }

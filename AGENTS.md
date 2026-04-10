@@ -59,8 +59,21 @@ Add a size check script to CI that fails if any package exceeds its budget:
 | `@workers-powertools/tracer`      | 5 KB                |
 | `@workers-powertools/idempotency` | 6 KB                |
 | `@workers-powertools/hono`        | 4 KB                |
+| `@workers-powertools/agents`      | 2 KB                |
 
 These budgets are initial estimates and should be tightened once baseline measurements are established.
+
+Current baseline (post-implementation, for reference):
+
+| Package                           | Gzipped (actual) |
+| --------------------------------- | ---------------- |
+| `@workers-powertools/commons`     | 707 B            |
+| `@workers-powertools/logger`      | 3.5 KB           |
+| `@workers-powertools/metrics`     | 2.2 KB           |
+| `@workers-powertools/tracer`      | 1.4 KB           |
+| `@workers-powertools/idempotency` | 1.1 KB           |
+| `@workers-powertools/hono`        | 1.4 KB           |
+| `@workers-powertools/agents`      | 416 B            |
 
 ### Checking Bundle Size
 

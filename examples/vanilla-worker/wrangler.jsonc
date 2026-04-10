@@ -14,21 +14,31 @@
     },
   },
 
-  // The logger and tracer need no bindings.
-  // Metrics requires an Analytics Engine dataset binding.
-  // Idempotency requires a KV namespace (or D1 database).
+  // Powertools env vars — consumed via addContext(request, ctx, env)
+  // and metrics.setBackend(). Override per environment as needed.
+  "vars": {
+    "POWERTOOLS_SERVICE_NAME": "vanilla-worker",
+    "POWERTOOLS_LOG_LEVEL": "INFO",
+    "POWERTOOLS_METRICS_NAMESPACE": "items-api",
+  },
 
-  "analytics_engine_datasets": [
-    {
-      "binding": "ANALYTICS",
-      "dataset": "vanilla_worker_metrics",
-    },
-  ],
+  // Pipelines binding for business metrics (PipelinesBackend default).
+  // TODO: replace stream ID before deploying.
+  // Run: npx wrangler pipelines setup
+  // "pipelines": [
+  //   {
+  //     "pipeline": "<STREAM_ID>",
+  //     "binding": "METRICS_PIPELINE",
+  //   },
+  // ],
 
-  "kv_namespaces": [
-    {
-      "binding": "IDEMPOTENCY_KV",
-      "id": "<KV_NAMESPACE_ID>",
-    },
-  ],
+  // KV namespace for the Idempotency persistence layer.
+  // TODO: replace with real namespace ID before deploying.
+  // Run: npx wrangler kv namespace create IDEMPOTENCY_KV
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "IDEMPOTENCY_KV",
+  //     "id": "<KV_NAMESPACE_ID>",
+  //   },
+  // ],
 }

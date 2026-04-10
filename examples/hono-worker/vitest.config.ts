@@ -11,8 +11,9 @@ export default defineConfig({
       // against real bindings, run `wrangler dev` or `wrangler deploy` and
       // test against the live Worker instead.
       miniflare: {
-        // Record<bindingName, { dataset: string }> is the required format.
-        analyticsEngineDatasets: { ANALYTICS: { dataset: "hono_worker_metrics" } },
+        // Simulates the Pipelines binding for injectMetrics PipelinesBackend.
+        // send() calls are accepted and silently discarded in-process.
+        pipelines: ["METRICS_PIPELINE"],
 
         // KV accepts a string[] of binding names.
         kvNamespaces: ["IDEMPOTENCY_KV"],

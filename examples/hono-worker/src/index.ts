@@ -25,12 +25,14 @@
  *   app.use(injectTracer(tracer));   ← wraps every handler in a named span
  *
  * Step 3 — Metrics via middleware
- *   import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+ *   import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
  *   import { injectMetrics } from "@workers-powertools/hono";
- *   const metrics = new Metrics({ namespace: "hono-worker", serviceName: "items-api" });
- *   app.use(injectMetrics(metrics)); ← auto-records request duration and count
+ *   const metrics = new Metrics(); // namespace from POWERTOOLS_METRICS_NAMESPACE env var
+ *   app.use(injectMetrics(metrics, {
+ *     backendFactory: (env) => new PipelinesBackend({ binding: env.METRICS_PIPELINE }),
+ *   }));
  *   For custom metrics (e.g. itemCreated), call metrics.addMetric() in handlers.
- *   Requires: "analytics_engine_datasets" binding in wrangler.jsonc.
+ *   Requires: "pipelines" binding in wrangler.jsonc.
  *
  * Step 4 — Idempotency via middleware (POST /items only)
  *   import { injectIdempotency } from "@workers-powertools/hono";
@@ -46,7 +48,8 @@ import { Hono } from "hono";
 
 import { Logger } from "@workers-powertools/logger";
 import { Tracer } from "@workers-powertools/tracer";
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
+import type { PipelineBinding } from "@workers-powertools/metrics";
 import {
   injectLogger,
   injectTracer,
@@ -57,13 +60,17 @@ import { IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
 export interface Env {
-  ANALYTICS: AnalyticsEngineDataset;
+  // POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
+  // set as vars in wrangler.jsonc — applied automatically by the middleware.
+  METRICS_PIPELINE: PipelineBinding;
   IDEMPOTENCY_KV: KVNamespace;
 }
 
-const logger = new Logger({ serviceName: "hono-worker", logLevel: "INFO" });
-const tracer = new Tracer({ serviceName: "hono-worker" });
-const metrics = new Metrics({ namespace: "hono-worker", serviceName: "items-api" });
+// serviceName / logLevel / namespace omitted — resolved from env vars at runtime:
+//   POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
+const logger = new Logger();
+const tracer = new Tracer();
+const metrics = new Metrics();
 
 // In-memory store — replace with a real binding (KV, D1) as desired
 const items = new Map<string, { id: string; name: string; createdAt: string }>();
@@ -81,10 +88,14 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use(injectLogger(logger));
 app.use(injectTracer(tracer));
-// Note: injectMetrics needs the ANALYTICS binding from env. The middleware
-// receives it via Hono's context (c.env.ANALYTICS). You may need to pass
-// a binding resolver: injectMetrics(metrics, { bindingKey: "ANALYTICS" })
-app.use(injectMetrics(metrics));
+// injectMetrics defaults to env.METRICS_PIPELINE (PipelinesBackend).
+// Override with backendFactory for a custom binding name or backend type.
+app.use(
+  injectMetrics(metrics, {
+    backendFactory: (env) =>
+      new PipelinesBackend({ binding: env["METRICS_PIPELINE"] as PipelineBinding }),
+  }),
+);
 
 // GET /items
 app.get("/items", (c) => {

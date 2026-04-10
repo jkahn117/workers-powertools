@@ -33,31 +33,31 @@ The following works directly inform the observability philosophy of this project
 
 ## Feature Portability Analysis
 
-| Lambda Powertools Feature                     | Portable? | Workers Equivalent / Notes                                                                                                            |
-| --------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Logger**                                    | Yes       | High value. `console.log` is unstructured. Workers Logs stores raw output -- structured JSON makes it queryable.                      |
-| **Metrics**                                   | Yes       | Analytics Engine replaces CloudWatch EMF. Non-blocking writes, SQL-queryable.                                                         |
-| **Tracer**                                    | Partial   | Workers now has automatic tracing (beta). Value-add is enrichment: custom spans, annotations, correlation IDs on traces.              |
-| **Idempotency**                               | Yes       | Very useful for Workers handling webhooks, payment callbacks, queue consumers. Use KV or D1 as persistence layer instead of DynamoDB. |
-| **Data Masking** _(Python only)_              | Yes       | Erase/mask PII in logs and responses. Web Crypto API replaces AWS KMS for encryption. High regulatory value.                          |
-| **Feature Flags** _(Python only)_             | Yes       | Rule engine backed by KV/D1 instead of AppConfig. Useful for gradual rollouts, A/B testing, time-based toggles.                       |
-| **Event Source Data Classes** _(Python only)_ | Yes       | Typed classes for Queue messages, Email events, Cron triggers, R2 notifications, Tail Worker events.                                  |
-| **Parser / Validation**                       | Yes       | Zod-based request validation is framework-agnostic and directly portable.                                                             |
-| **Parameters**                                | Low       | Workers use env bindings and Secrets Store, not SSM/Secrets Manager. Less need for a parameters abstraction.                          |
-| **Batch Processing**                          | Partial   | Relevant for Queue consumers. Simpler model than SQS/Kinesis but partial failure handling is still useful.                            |
-| **Event Handler**                             | No        | Hono/itty-router already fill this niche. Not worth duplicating.                                                                      |
-| **Streaming** _(Python only)_                 | Low       | Workers already stream-first via Streams API. R2 `get()` returns `ReadableStream` natively.                                           |
-| **Middleware Factory** _(Python only)_        | No        | Hono middleware, TypeScript function composition, itty-router `onRequest` already cover this.                                         |
-| **JMESPath**                                  | No        | Niche. Zod/TypeScript-first validation is more idiomatic.                                                                             |
+| Lambda Powertools Feature                     | Portable? | Workers Equivalent / Notes                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Logger**                                    | Yes       | High value. `console.log` is unstructured. Workers Logs stores raw output -- structured JSON makes it queryable.                                                                                                                                                                                                                                     |
+| **Metrics**                                   | Yes       | Business metrics (successfulBooking, deckGenerated) with named dimensions. Pipelines → R2/Iceberg is the primary backend; Analytics Engine available as explicit opt-in with documented positional-schema limitations. Platform-level signals (CPU time, error rate, p99) are provided by Workers Metrics at zero cost — do not duplicate them here. |
+| **Tracer**                                    | Partial   | Workers now has automatic tracing (beta). Value-add is enrichment: custom spans, annotations, correlation IDs on traces.                                                                                                                                                                                                                             |
+| **Idempotency**                               | Yes       | Very useful for Workers handling webhooks, payment callbacks, queue consumers. Use KV or D1 as persistence layer instead of DynamoDB.                                                                                                                                                                                                                |
+| **Data Masking** _(Python only)_              | Yes       | Erase/mask PII in logs and responses. Web Crypto API replaces AWS KMS for encryption. High regulatory value.                                                                                                                                                                                                                                         |
+| **Feature Flags** _(Python only)_             | Yes       | Rule engine backed by KV/D1 instead of AppConfig. Useful for gradual rollouts, A/B testing, time-based toggles.                                                                                                                                                                                                                                      |
+| **Event Source Data Classes** _(Python only)_ | Yes       | Typed classes for Queue messages, Email events, Cron triggers, R2 notifications, Tail Worker events.                                                                                                                                                                                                                                                 |
+| **Parser / Validation**                       | Yes       | Zod-based request validation is framework-agnostic and directly portable.                                                                                                                                                                                                                                                                            |
+| **Parameters**                                | Low       | Workers use env bindings and Secrets Store, not SSM/Secrets Manager. Less need for a parameters abstraction.                                                                                                                                                                                                                                         |
+| **Batch Processing**                          | Partial   | Relevant for Queue consumers. Simpler model than SQS/Kinesis but partial failure handling is still useful.                                                                                                                                                                                                                                           |
+| **Event Handler**                             | No        | Hono/itty-router already fill this niche. Not worth duplicating.                                                                                                                                                                                                                                                                                     |
+| **Streaming** _(Python only)_                 | Low       | Workers already stream-first via Streams API. R2 `get()` returns `ReadableStream` natively.                                                                                                                                                                                                                                                          |
+| **Middleware Factory** _(Python only)_        | No        | Hono middleware, TypeScript function composition, itty-router `onRequest` already cover this.                                                                                                                                                                                                                                                        |
+| **JMESPath**                                  | No        | Niche. Zod/TypeScript-first validation is more idiomatic.                                                                                                                                                                                                                                                                                            |
 
 ## v1 Scope: Core Features
 
 Based on the analysis above, v1 focuses on the four highest-impact, most portable features:
 
-1. **Logger** -- Structured logging with Workers context enrichment
-2. **Metrics** -- Custom metrics via Analytics Engine
-3. **Tracer** -- Request correlation and trace enrichment
-4. **Idempotency** -- Prevent duplicate execution for exactly-once semantics
+1. **Logger** -- Structured logging with Workers context enrichment, scoped child loggers, DO/Agent RPC instrumentation
+2. **Metrics** -- Named business metrics (not infrastructure metrics) with pluggable backends; Pipelines → R2/Iceberg as default, Analytics Engine as explicit opt-in
+3. **Tracer** -- Request correlation and trace enrichment complementing Workers' built-in automatic tracing
+4. **Idempotency** -- Prevent duplicate execution for exactly-once semantics in webhooks, queue consumers, and payment flows
 
 ---
 
@@ -200,46 +200,70 @@ app.get("/hello", (c) => {
 
 ## Feature 2: Metrics (`@workers-powertools/metrics`)
 
-### Problem
+### Problem and Scope
 
-Workers provides built-in request metrics (invocation counts, CPU time, errors) via the dashboard and GraphQL API, but there's no ergonomic way to emit custom application-level metrics. Analytics Engine is the underlying primitive, but its API is low-level (`writeDataPoint` with blobs/doubles arrays).
+Lambda Powertools Metrics exists to give developers an ergonomic way to emit **named business metrics** — `successfulBooking`, `deckGenerated`, `failedPayment` — with a namespace, dimensions, and a count. The backend (CloudWatch EMF) is an implementation detail; the semantic model is what matters.
+
+The same gap exists in Workers. Platform-level signals (invocation count, CPU time, error rate, p99 latency) are already provided by the Workers Metrics dashboard with zero code. What the platform does not provide is application-level business metrics: how many orders were placed, which AI model was called, what percentage of deck generations succeeded.
+
+**This utility targets business metrics exclusively, not infrastructure metrics.** Do not use it to re-emit what the platform already captures for free.
+
+### Why Pipelines, not Analytics Engine
+
+The natural Workers primitive for business metrics is Workers Analytics Engine. However, AE has a fundamental schema constraint that makes it unsuitable as a general business metrics backend:
+
+- **Schema is positional.** Dimensions are packed into `blob1`, `blob2`, ... `blob20`. SQL queries depend on column position (`blob3 AS provider`). Adding or reordering a dimension silently breaks every existing query.
+- **No named columns.** There is no way to declare that `blob3` means `provider`. The mapping lives only in the calling code and in SQL aliases.
+- **No schema enforcement.** Wrong field types or missing fields are silently accepted at write time and produce corrupt results at query time.
+
+Cloudflare Pipelines (open beta, Feb 2026) solves all of these:
+
+- Events are plain JSON objects with **named fields** — no positional encoding
+- `wrangler types` generates **TypeScript types** from the pipeline schema — schema mismatches are caught at compile time
+- Output is **Apache Iceberg tables** in R2, queryable by named column via R2 SQL
+- SQL queries use real column names: `WHERE metric_name = 'successfulBooking'`
+- **Exactly-once delivery** to R2
+
+The utility therefore ships with **Pipelines as the default backend** and Analytics Engine available as an explicit opt-in for users with existing AE dashboards.
 
 ### Key Features
 
-- **Named metrics with units** -- `metrics.addMetric('orderProcessed', MetricUnit.Count, 1)` instead of raw `writeDataPoint`
-- **Dimensions** -- Add key-value dimensions for slicing metrics (service, environment, endpoint, customer tier)
-- **Default dimensions** -- Set dimensions once (service name, environment), applied to all metrics
-- **Cold start metric** -- Automatically emit a `ColdStart` metric on first request to an isolate
-- **Batching** -- Aggregate multiple metrics within a request and flush once via `ctx.waitUntil`
-- **Metadata** -- Attach high-cardinality data (request IDs, user IDs) that's logged alongside metrics but not used as dimensions
-- **Validation** -- Warn or error on common mistakes (missing namespace, too many dimensions)
+- **Named business metrics with units** -- `metrics.addMetric('successfulBooking', MetricUnit.Count, 1)` ✓
+- **Dimensions** -- Key-value slices for grouping (environment, model, tier, route) ✓
+- **Default dimensions** -- Set once in constructor, applied to every metric ✓
+- **Namespace** -- Logical grouping, configurable via constructor or `POWERTOOLS_METRICS_NAMESPACE` env var ✓
+- **Pluggable backends** -- `PipelinesBackend` (default), `AnalyticsEngineBackend` (explicit, with documented limitations) ✓
+- **Buffered flush** -- Batch metrics within a request, flush non-blocking via `ctx.waitUntil(metrics.flush())` ✓
+- **`flushSync()`** -- Synchronous flush for DO RPC methods where `ExecutionContext` is not available ✓
+- **`autoFlush: true`** -- Write each metric immediately on `addMetric()` for alarm handlers and queue consumers ✓
+- **Logger correlation ID injection** -- When a `Logger` instance is provided, the current `correlation_id` is automatically included in every flushed metric record _(v2)_
 
 ### Approach
 
 ```typescript
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 
 const metrics = new Metrics({
-  namespace: "ecommerce", // maps to Analytics Engine dataset
+  namespace: "ecommerce", // or POWERTOOLS_METRICS_NAMESPACE env var
   serviceName: "orders",
   defaultDimensions: { environment: "production" },
 });
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    metrics.setBinding(env.ANALYTICS); // Analytics Engine binding
+    // Default backend is Pipelines — resolved per-request from env
+    metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
 
+    metrics.addDimension("route", "/orders");
     metrics.addMetric("orderReceived", MetricUnit.Count, 1);
-    metrics.addDimension("endpoint", "/orders");
 
     const start = Date.now();
     const result = await processOrder(request);
-    const duration = Date.now() - start;
 
-    metrics.addMetric("orderLatency", MetricUnit.Milliseconds, duration);
+    metrics.addMetric("orderLatency", MetricUnit.Milliseconds, Date.now() - start);
     metrics.addMetric("orderValue", MetricUnit.None, result.total);
 
-    // Flush via waitUntil so it doesn't block the response
+    // Non-blocking — writes happen after the response is returned
     ctx.waitUntil(metrics.flush());
 
     return new Response(JSON.stringify(result));
@@ -247,17 +271,103 @@ export default {
 };
 ```
 
+**Record written to Pipelines (named fields, no positional encoding):**
+
+```json
+{
+  "namespace": "ecommerce",
+  "service": "orders",
+  "metric_name": "orderReceived",
+  "metric_unit": "Count",
+  "metric_value": 1,
+  "timestamp": "2026-04-09T12:00:00.000Z",
+  "environment": "production",
+  "route": "/orders"
+}
+```
+
+**Queryable by name in R2 SQL:**
+
+```sql
+SELECT
+  metric_name,
+  SUM(metric_value) AS total,
+  date_trunc('day', timestamp) AS day
+FROM metrics_table
+WHERE namespace = 'ecommerce'
+  AND metric_name = 'orderReceived'
+  AND timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY metric_name, day
+ORDER BY day DESC
+```
+
+### Pluggable Backend Interface
+
+```typescript
+export interface MetricsBackend {
+  /** Async write — awaitable, use with ctx.waitUntil(metrics.flush()) */
+  write(entries: MetricEntry[], context: MetricContext): Promise<void>;
+
+  /** Sync write — fire-and-forget, use in DO RPC / alarm contexts */
+  writeSync(entries: MetricEntry[], context: MetricContext): void;
+}
+
+export interface MetricContext {
+  namespace: string;
+  serviceName: string;
+  correlationId?: string;
+}
+```
+
+### Analytics Engine Backend — Explicit Opt-In
+
+The `AnalyticsEngineBackend` is retained for users with existing AE dashboards. It is an **explicit opt-in** — it is never the default. Its limitations are documented at the class level and must be acknowledged when used:
+
+```typescript
+import { Metrics, MetricUnit, AnalyticsEngineBackend } from "@workers-powertools/metrics";
+
+const metrics = new Metrics({ namespace: "ecommerce", serviceName: "orders" });
+
+// Explicit opt-in — see AnalyticsEngineBackend docs for schema limitations
+metrics.setBackend(new AnalyticsEngineBackend({ binding: env.ANALYTICS }));
+```
+
+**Documented limitations of `AnalyticsEngineBackend`:**
+
+1. **Positional schema.** Dimensions are packed into `blob1..blob20` in insertion order. Adding, removing, or reordering dimensions breaks existing SQL queries silently.
+2. **No named columns.** Every query must alias blobs (`blob3 AS provider`). The mapping is not declared anywhere in the schema.
+3. **No schema enforcement.** Wrong types and missing fields are silently accepted at write time.
+4. **Single numeric value per data point.** Only one double is written per `addMetric()` call. Multiple values per event require multiple `writeDataPoint` calls, each with a separate positional layout.
+5. **20-dimension limit.** AE supports a maximum of 20 blobs per data point. Exceeding this silently truncates dimensions.
+6. **Designed for aggregate time-series, not event schemas.** AE is optimised for high-cardinality counters (per-user, per-route) queried with GROUP BY and SUM. It is not a general-purpose event store.
+
+If any of these limitations are a concern, use `PipelinesBackend` instead.
+
+### Hono Middleware
+
+The `injectMetrics` middleware in `@workers-powertools/hono` uses **Option B** (backend factory): the caller provides a factory function called per-request, which receives `c.env` and returns a configured backend. Pipelines is the default if no factory is provided and a `METRICS_PIPELINE` binding is present.
+
+```typescript
+import { injectMetrics } from "@workers-powertools/hono";
+import { PipelinesBackend } from "@workers-powertools/metrics";
+
+app.use(
+  injectMetrics(metrics, {
+    // Factory called per-request with c.env — resolves binding lazily
+    backendFactory: (env) => new PipelinesBackend({ binding: env.METRICS_PIPELINE }),
+  }),
+);
+```
+
 ### Workers-Specific Design Decisions
 
-- **Analytics Engine as primary backend.** Maps namespace to AE dataset, dimensions to blobs, metric values to doubles. Writes are non-blocking by design.
-- **`ctx.waitUntil` for flush.** Metric writes happen after the response is sent, zero impact on latency.
-- **Blob/double mapping.** AE supports 20 blobs and 20 doubles per data point. The metrics utility manages this mapping transparently, packing dimensions into blobs and metric values into doubles.
-- **No EMF format.** CloudWatch EMF is AWS-specific. Instead, we write directly to AE's `writeDataPoint` API.
-- **SQL-queryable output.** Metrics written by this utility are queryable via the AE SQL API, enabling Grafana dashboards, custom analytics, etc.
-
-### Future: Pluggable Backends
-
-The internal interface will be designed around a `MetricsBackend` interface, allowing future adapters for Prometheus push gateway, Datadog, etc. But v1 ships with Analytics Engine only.
+- **Pipelines as default backend.** Named fields, typed schema, Iceberg output, no positional encoding. R2 SQL queries use real column names.
+- **`ctx.waitUntil` for flush.** `flush()` is genuinely async (Pipelines `send()` returns a Promise). Call via `ctx.waitUntil` so writes happen after the response is sent.
+- **`flushSync()` for DO contexts.** Fires `send()` without awaiting — safe in RPC methods and alarm handlers where `ExecutionContext` is not always available.
+- **`autoFlush: true` for alarm/queue contexts.** Writes each metric immediately on `addMetric()`. No flush call ever needed.
+- **`POWERTOOLS_METRICS_NAMESPACE` env var.** `namespace` is optional in the constructor; if omitted it is read from the env var, then falls back to `"default_namespace"` — matching Lambda Powertools behaviour.
+- **No EMF format.** CloudWatch EMF is AWS-specific. Pipelines writes plain JSON; AE writes positional blobs. Neither uses EMF.
+- **Correlation ID threading _(v2)_.** When a `Logger` instance is provided to the constructor, the current `correlationId` from the logger's shared state is injected into every flushed metric record, linking metrics to logs for the same request.
 
 ---
 
@@ -402,12 +512,15 @@ export default {
 ```
 @workers-powertools/
 ├── logger              # Structured logging
-├── metrics             # Custom metrics via Analytics Engine
+├── metrics             # Business metrics — Pipelines backend (default), AE backend (opt-in)
+│   ├── PipelinesBackend        # Named fields, Iceberg/R2 output, typed schema
+│   └── AnalyticsEngineBackend  # Positional blobs/doubles — explicit opt-in, see limitations
 ├── tracer              # Correlation IDs, trace enrichment
 ├── idempotency         # Exactly-once execution
 │   ├── /kv             # KV persistence layer
 │   ├── /d1             # D1 persistence layer
 │   └── /do             # Durable Objects persistence layer
+├── agents              # Agents SDK integration (injectAgentContext, withRpcContext)
 ├── commons             # Shared types, utilities
 └── hono                # All Hono middleware adapters in one package
                         # (injectLogger, injectMetrics, injectTracer, injectIdempotency)
@@ -708,11 +821,11 @@ export default {
 
 **Why not v1:** Workers already uses standard Web APIs (`Request`, `Response`) for the primary `fetch` handler, so the typing story is already good for HTTP. The value increases as more non-HTTP trigger types (Queues, Email, R2 events) gain adoption. This package has low risk and could be promoted to v1 if demand emerges during development.
 
-### Pluggable Metrics Backends (`@workers-powertools/metrics-prometheus`, etc.)
+### Additional Metrics Backends
 
-**Trigger:** Demand for exporting metrics to non-Cloudflare observability platforms.
+**Trigger:** Demand for exporting business metrics to platforms other than Cloudflare Pipelines.
 
-**What it would do:** Implement the `MetricsBackend` interface (designed in v1 but only implemented for Analytics Engine) for Prometheus push gateway, Datadog, New Relic, and OpenTelemetry metrics. Each backend would be a separate package. The flush mechanism would use `ctx.waitUntil` to push metrics to external endpoints without blocking the response.
+**What it would do:** Implement the `MetricsBackend` interface (shipped in v1 with `PipelinesBackend` and `AnalyticsEngineBackend`) for Prometheus push gateway, Datadog, New Relic, and OpenTelemetry metrics. Each additional backend would be a separate package. The `MetricsBackend` interface is already designed to accommodate this — any new backend just implements `write()` and `writeSync()`.
 
 ### Middleware Adapters for Other Frameworks
 

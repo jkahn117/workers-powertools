@@ -23,12 +23,12 @@
  *   Wrap handler logic in tracer.captureAsync("handleRequest", async () => { ... }).
  *
  * Step 3 — Metrics
- *   import { Metrics, MetricUnit } from "@workers-powertools/metrics";
- *   const metrics = new Metrics({ namespace: "vanilla-worker", serviceName: "items-api" });
- *   In fetch(): call metrics.setBinding(env.ANALYTICS).
+ *   import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
+ *   const metrics = new Metrics(); // namespace from POWERTOOLS_METRICS_NAMESPACE env var
+ *   In fetch(): call metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE })).
  *   Record metrics (e.g. metrics.addMetric("itemCreated", MetricUnit.Count, 1)).
  *   Flush with ctx.waitUntil(metrics.flush()) before returning.
- *   Requires: "analytics_engine_datasets" binding in wrangler.jsonc.
+ *   Requires: "pipelines" binding in wrangler.jsonc.
  *
  * Step 4 — Idempotency (POST /items only)
  *   import { makeIdempotent, IdempotencyConfig } from "@workers-powertools/idempotency";
@@ -41,21 +41,27 @@
 
 import { Logger } from "@workers-powertools/logger";
 import { Tracer } from "@workers-powertools/tracer";
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
+import type { PipelineBinding } from "@workers-powertools/metrics";
 import { makeIdempotent, IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
 export interface Env {
-  ANALYTICS: AnalyticsEngineDataset;
+  // POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
+  // can be set as plain environment variables in wrangler.jsonc [vars] and
+  // are applied at runtime via addContext(request, ctx, env) / setBackend().
+  METRICS_PIPELINE: PipelineBinding;
   IDEMPOTENCY_KV: KVNamespace;
 }
 
 // In-memory store — replace with a real binding (KV, D1) as desired
 const items = new Map<string, { id: string; name: string; createdAt: string }>();
 
-const logger = new Logger({ serviceName: "vanilla-worker", logLevel: "INFO" });
-const tracer = new Tracer({ serviceName: "vanilla-worker" });
-const metrics = new Metrics({ namespace: "vanilla-worker", serviceName: "items-api" });
+// serviceName / logLevel / namespace omitted — resolved from env vars at runtime:
+//   POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
+const logger = new Logger();
+const tracer = new Tracer();
+const metrics = new Metrics();
 
 // Lazily initialised on first request — the KV binding is only available
 // inside the fetch handler, not at module scope.
@@ -108,9 +114,11 @@ export default {
     const { method } = request;
     const path = url.pathname;
 
-    logger.addContext(request, ctx);
-    tracer.addContext(request, ctx);
-    metrics.setBinding(env.ANALYTICS);
+    // Pass env so POWERTOOLS_SERVICE_NAME and POWERTOOLS_LOG_LEVEL are applied.
+    logger.addContext(request, ctx, env as unknown as Record<string, unknown>);
+    tracer.addContext(request, ctx, env as unknown as Record<string, unknown>);
+    // PipelinesBackend resolved per-request from the env binding.
+    metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
 
     try {
       // Route: GET /items

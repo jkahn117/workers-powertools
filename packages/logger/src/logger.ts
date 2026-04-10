@@ -59,6 +59,9 @@ export class Logger extends PowertoolsBase {
     this.debugSampleRate = config?.debugSampleRate ?? 0;
     this.logBufferingEnabled = config?.logBufferingEnabled ?? false;
     this.state = {
+      // logLevel resolved from constructor option only at construction time.
+      // Call addContext(request, ctx, env) to apply POWERTOOLS_LOG_LEVEL at
+      // runtime once the env binding is available.
       logLevel: config?.logLevel ?? "INFO",
       cfProperties: {},
       contextEnriched: false,
@@ -184,8 +187,40 @@ export class Logger extends PowertoolsBase {
    * Should be called once per request at the start of the handler.
    * Context is automatically shared with all children created via
    * withComponent().
+   *
+   * Pass the Workers `env` object as the third argument to apply
+   * runtime configuration from environment variables:
+   *   - POWERTOOLS_LOG_LEVEL  — overrides the constructor logLevel
+   *   - POWERTOOLS_SERVICE_NAME — overrides the constructor serviceName
+   *
+   * @example
+   * export default {
+   *   async fetch(request, env, ctx) {
+   *     logger.addContext(request, ctx, env);
+   *   }
+   * }
    */
-  addContext(request: Request, _ctx?: ExecutionContext): void {
+  addContext(
+    request: Request,
+    _ctx?: ExecutionContext,
+    env?: Record<string, unknown>,
+  ): void {
+    // Apply runtime env-var config when env is provided.
+    // Constructor option takes precedence; env vars are the fallback.
+    if (env && !this.config.logLevel) {
+      const envLevel = env["POWERTOOLS_LOG_LEVEL"];
+      if (typeof envLevel === "string" && envLevel in LOG_LEVEL_VALUE) {
+        this.state.logLevel = envLevel as LogLevel;
+      }
+    }
+
+    if (env && !this.config.serviceName) {
+      const envService = env["POWERTOOLS_SERVICE_NAME"];
+      if (typeof envService === "string" && envService) {
+        (this as unknown as { serviceName: string }).serviceName = envService;
+      }
+    }
+
     this.state.correlationId = extractCorrelationId(
       request,
       this.config.correlationIdConfig,
