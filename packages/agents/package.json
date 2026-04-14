@@ -1,7 +1,7 @@
 {
   "name": "@workers-powertools/agents",
-  "version": "0.0.0",
-  "description": "Cloudflare Agents SDK integration for Workers Powertools — instrumentation for Agent RPC methods, DO lifecycle, and WebSocket connections",
+  "version": "0.1.0",
+  "description": "Cloudflare Agents SDK integration for Workers Powertools \u2014 instrumentation for Agent RPC methods, DO lifecycle, and WebSocket connections",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +13,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -23,9 +24,9 @@
     "lint": "eslint src/"
   },
   "peerDependencies": {
-    "@workers-powertools/logger": "workspace:*",
-    "@workers-powertools/tracer": "workspace:*",
-    "agents": "^0.10.0"
+    "@workers-powertools/logger": ">=0.1.0",
+    "@workers-powertools/tracer": ">=0.1.0",
+    "agents": ">=0.10.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

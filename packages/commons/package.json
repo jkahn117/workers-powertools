@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/commons",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Shared types, utilities, and base classes for Workers Powertools",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/tracer",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Correlation IDs and trace enrichment for Cloudflare Workers",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
