@@ -1,5 +1,5 @@
 import { PowertoolsBase, extractCorrelationId } from "@workers-powertools/commons";
-import type { TracerConfig, SpanContext } from "./types";
+import type { TracerConfig, SpanContext, CaptureMethodOptions } from "./types";
 
 /**
  * Trace enrichment utility for Cloudflare Workers.
@@ -108,6 +108,76 @@ export class Tracer extends PowertoolsBase {
     }
 
     return fetch(input, { ...init, headers });
+  }
+
+  /**
+   * TC39 Stage 3 method decorator factory that wraps an async class method
+   * in a `captureAsync` span automatically.
+   *
+   * The span name defaults to "ClassName.methodName" and is derived at
+   * decoration time — no runtime overhead per call. Override with the
+   * `name` option when you want a custom span name.
+   *
+   * Works with TypeScript 5+ without `experimentalDecorators`. Do not
+   * enable `experimentalDecorators` in tsconfig — that activates the
+   * legacy Stage 2 decorator model which has different semantics.
+   *
+   * @example
+   * class PaymentService {
+   *   \@tracer.captureMethod()
+   *   async processPayment(amount: number): Promise<Receipt> {
+   *     // span: "PaymentService.processPayment"
+   *     return charge(amount);
+   *   }
+   *
+   *   \@tracer.captureMethod({ name: "chargeCard" })
+   *   async internalCharge(): Promise<void> {
+   *     // span: "chargeCard"
+   *   }
+   * }
+   */
+  captureMethod(options?: CaptureMethodOptions) {
+    const tracer = this;
+    const rethrowError = options?.rethrowError ?? true;
+
+    return function <TArgs extends unknown[], T>(
+      originalMethod: (...args: TArgs) => Promise<T>,
+      context: ClassMethodDecoratorContext,
+    ): (...args: TArgs) => Promise<T> {
+      // context.name is available at decoration time (static, no runtime cost).
+      // className is resolved via addInitializer so we get the actual class
+      // name rather than a placeholder.
+      const methodName = String(context.name);
+      let spanName = options?.name;
+
+      // Use addInitializer to capture the class name at instance creation.
+      // This runs once per instance construction, not per method call.
+      if (!spanName) {
+        context.addInitializer(function (this: unknown) {
+          const className =
+            this != null && typeof this === "object" && "constructor" in this
+              ? (this as { constructor: { name: string } }).constructor.name
+              : "Unknown";
+          spanName = `${className}.${methodName}`;
+        });
+      }
+
+      return async function (this: unknown, ...args: TArgs): Promise<T> {
+        const resolvedName = spanName ?? methodName;
+
+        try {
+          return await tracer.captureAsync(resolvedName, async () => {
+            return await originalMethod.apply(this, args);
+          });
+        } catch (error) {
+          if (rethrowError) {
+            throw error;
+          }
+          // Span already recorded the error via captureAsync.
+          return undefined as unknown as T;
+        }
+      };
+    };
   }
 
   /** Attach an annotation (low-cardinality string) to the current context. */

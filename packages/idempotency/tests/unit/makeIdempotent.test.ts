@@ -98,7 +98,7 @@ describe("makeIdempotent", () => {
     await expect(idempotentFn({ orderId: "order-4" })).rejects.toThrow("fail");
 
     // Record should be gone so the function can be retried
-    const record = await persistence.getRecord(
+    const _record = await persistence.getRecord(
       /* we don't know the hashed key, so check the store is empty */ "",
     );
     expect(persistence.store.size).toBe(0);

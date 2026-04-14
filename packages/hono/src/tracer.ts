@@ -14,7 +14,7 @@ import type { Tracer } from "@workers-powertools/tracer";
 export function injectTracer(tracer: Tracer): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     // Extract correlation ID and enrich the tracer.
-    tracer.addContext(c.req.raw, c.executionCtx);
+    tracer.addContext(c.req.raw, c.executionCtx as unknown as ExecutionContext);
 
     const spanName = `${c.req.method} ${c.req.routePath}`;
 

@@ -8,33 +8,21 @@
  *   POST /items        — create an item (idempotent via Idempotency-Key header)
  *   GET  /items/:id    — get a single item
  *
- * ─── HOW TO INTEGRATE POWERTOOLS ────────────────────────────────────────────
+ * ─── POWERTOOLS INTEGRATION ──────────────────────────────────────────────────
  *
- * Step 1 — Logger
- *   import { Logger } from "@workers-powertools/logger";
- *   const logger = new Logger({ serviceName: "vanilla-worker", logLevel: "INFO" });
- *   In fetch(): call logger.addContext(request, ctx) at the top of every request.
- *   Replace any console.log calls with logger.info / logger.warn / logger.error.
+ * Logger  — addContext(request, ctx, env) enriches all logs with CF properties,
+ *           correlation ID, and runtime env vars (POWERTOOLS_SERVICE_NAME etc.)
  *
- * Step 2 — Tracer
- *   import { Tracer } from "@workers-powertools/tracer";
- *   const tracer = new Tracer({ serviceName: "vanilla-worker" });
- *   In fetch(): call tracer.addContext(request, ctx).
- *   Wrap handler logic in tracer.captureAsync("handleRequest", async () => { ... }).
+ * Tracer  — @tracer.captureMethod() wraps each ItemService method in a named
+ *           span automatically. TC39 Stage 3 decorator syntax is enabled via
+ *           experimentalDecorators: false in tsconfig.json — esbuild/wrangler
+ *           lowers the syntax at bundle time.
  *
- * Step 3 — Metrics
- *   import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
- *   const metrics = new Metrics(); // namespace from POWERTOOLS_METRICS_NAMESPACE env var
- *   In fetch(): call metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE })).
- *   Record metrics (e.g. metrics.addMetric("itemCreated", MetricUnit.Count, 1)).
- *   Flush with ctx.waitUntil(metrics.flush()) before returning.
- *   Requires: "pipelines" binding in wrangler.jsonc.
+ * Metrics — PipelinesBackend writes named-field JSON records to Cloudflare
+ *           Pipelines → R2/Iceberg, queryable by column name via R2 SQL.
  *
- * Step 4 — Idempotency (POST /items only)
- *   import { makeIdempotent, IdempotencyConfig } from "@workers-powertools/idempotency";
- *   import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
- *   Wrap createItem() with makeIdempotent(), keyed on the Idempotency-Key header.
- *   Requires: "kv_namespaces" binding in wrangler.jsonc.
+ * Idempotency — makeIdempotent() wraps ItemService.create so duplicate POSTs
+ *               with the same Idempotency-Key header return the stored result.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -48,23 +36,20 @@ import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
 export interface Env {
   // POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
-  // can be set as plain environment variables in wrangler.jsonc [vars] and
-  // are applied at runtime via addContext(request, ctx, env) / setBackend().
+  // are set as vars in wrangler.jsonc and applied via addContext(..., env).
   METRICS_PIPELINE: PipelineBinding;
   IDEMPOTENCY_KV: KVNamespace;
 }
 
-// In-memory store — replace with a real binding (KV, D1) as desired
-const items = new Map<string, { id: string; name: string; createdAt: string }>();
+type Item = { id: string; name: string; createdAt: string };
+type CreateItemEvent = { idempotencyKey: string; name: string };
 
-// serviceName / logLevel / namespace omitted — resolved from env vars at runtime:
-//   POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL, POWERTOOLS_METRICS_NAMESPACE
+// serviceName / logLevel / namespace resolved from env vars at runtime.
 const logger = new Logger();
 const tracer = new Tracer();
 const metrics = new Metrics();
 
-// Lazily initialised on first request — the KV binding is only available
-// inside the fetch handler, not at module scope.
+// Lazily initialised on first request — env bindings unavailable at module scope.
 let persistenceLayer: KVPersistenceLayer | undefined;
 
 const idempotencyConfig = new IdempotencyConfig({
@@ -72,36 +57,57 @@ const idempotencyConfig = new IdempotencyConfig({
   expiresAfterSeconds: 3600,
 });
 
-type CreateItemEvent = { idempotencyKey: string; name: string };
-type CreateItemResult = { id: string; name: string; createdAt: string };
+/**
+ * ItemService encapsulates the business logic for the items resource.
+ *
+ * Each method is decorated with @tracer.captureMethod(), which automatically
+ * wraps it in a named span: "ItemService.list", "ItemService.create",
+ * "ItemService.getById". No manual captureAsync() boilerplate required.
+ *
+ * TC39 Stage 3 decorator syntax — requires experimentalDecorators: false
+ * and target: ES2022 in tsconfig.json so esbuild lowers the syntax at
+ * bundle time (see tsconfig.json).
+ */
+class ItemService {
+  // In-memory store — replace with KV or D1 in production.
+  private readonly store = new Map<string, Item>();
 
-// makeIdempotent wraps the core business logic. It receives a plain
-// serialisable event and returns a plain serialisable result — Response
-// construction happens outside so KV serialisation stays clean.
+  @tracer.captureMethod()
+  async list(): Promise<Item[]> {
+    const all = Array.from(this.store.values());
+    logger.info("Listed items", { count: all.length });
+    return all;
+  }
+
+  @tracer.captureMethod()
+  async create(event: CreateItemEvent): Promise<Item> {
+    const id = crypto.randomUUID();
+    const item: Item = { id, name: event.name, createdAt: new Date().toISOString() };
+    this.store.set(id, item);
+    logger.info("Item created", { itemId: id });
+    metrics.addMetric("itemCreated", MetricUnit.Count, 1);
+    return item;
+  }
+
+  @tracer.captureMethod()
+  async getById(id: string): Promise<Item | undefined> {
+    const item = this.store.get(id);
+    if (!item) logger.warn("Item not found", { itemId: id });
+    return item;
+  }
+}
+
+const service = new ItemService();
+
+// makeIdempotent wraps service.create. The span from @tracer.captureMethod()
+// only fires on first execution — duplicate requests short-circuit before
+// re-entering the method, so no orphaned spans on cache hits.
 const createItemIdempotent = makeIdempotent(
-  (event: CreateItemEvent): Promise<CreateItemResult> => {
-    return tracer.captureAsync("createItem", async () => {
-      const id = crypto.randomUUID();
-      const item: CreateItemResult = {
-        id,
-        name: event.name,
-        createdAt: new Date().toISOString(),
-      };
-      items.set(id, item);
-
-      logger.info("Item created", { itemId: id });
-      metrics.addMetric("itemCreated", MetricUnit.Count, 1);
-
-      return item;
-    });
-  },
+  (event: CreateItemEvent) => service.create(event),
   {
-    // persistenceLayer is set before first call via createItemIdempotent's
-    // closure — see handleCreateItem below.
     get persistenceLayer() {
-      if (!persistenceLayer) {
+      if (!persistenceLayer)
         throw new Error("Idempotency persistence layer not initialised");
-      }
       return persistenceLayer;
     },
     config: idempotencyConfig,
@@ -114,29 +120,31 @@ export default {
     const { method } = request;
     const path = url.pathname;
 
-    // Pass env so POWERTOOLS_SERVICE_NAME and POWERTOOLS_LOG_LEVEL are applied.
+    // Apply runtime env-var config (POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL).
     logger.addContext(request, ctx, env as unknown as Record<string, unknown>);
     tracer.addContext(request, ctx, env as unknown as Record<string, unknown>);
-    // PipelinesBackend resolved per-request from the env binding.
     metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
 
     try {
-      // Route: GET /items
       if (method === "GET" && path === "/items") {
-        return await handleListItems();
+        return Response.json(await service.list());
       }
 
-      // Route: POST /items
       if (method === "POST" && path === "/items") {
         const body = (await request.json()) as { name?: string };
-        return await handleCreateItem(body, request, env);
+        if (!body.name) {
+          return new Response("Missing required field: name", { status: 400 });
+        }
+        persistenceLayer ??= new KVPersistenceLayer({ binding: env.IDEMPOTENCY_KV });
+        const idempotencyKey = request.headers.get("Idempotency-Key") ?? body.name;
+        const item = await createItemIdempotent({ idempotencyKey, name: body.name });
+        return Response.json(item, { status: 201 });
       }
 
-      // Route: GET /items/:id
       const itemMatch = path.match(/^\/items\/([^/]+)$/);
       if (method === "GET" && itemMatch) {
-        const id = itemMatch[1] ?? "";
-        return await handleGetItem(id);
+        const item = await service.getById(itemMatch[1] ?? "");
+        return item ? Response.json(item) : new Response("Not Found", { status: 404 });
       }
 
       return new Response("Not Found", { status: 404 });
@@ -148,44 +156,3 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-
-function handleListItems(): Promise<Response> {
-  return tracer.captureAsync("listItems", async () => {
-    const all = Array.from(items.values());
-    logger.info("Listed items", { count: all.length });
-    return Response.json(all);
-  });
-}
-
-async function handleCreateItem(
-  body: { name?: string },
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (!body.name) {
-    return new Response("Missing required field: name", { status: 400 });
-  }
-
-  // Initialise the persistence layer on first use, then reuse across
-  // requests on the same isolate (env bindings are stable per isolate).
-  persistenceLayer ??= new KVPersistenceLayer({ binding: env.IDEMPOTENCY_KV });
-
-  // Use the Idempotency-Key header if provided, otherwise fall back to the
-  // item name. In production you'd require the header for strict idempotency.
-  const idempotencyKey = request.headers.get("Idempotency-Key") ?? body.name;
-
-  const item = await createItemIdempotent({ idempotencyKey, name: body.name });
-
-  return Response.json(item, { status: 201 });
-}
-
-function handleGetItem(id: string): Promise<Response> {
-  return tracer.captureAsync("getItem", async () => {
-    const item = items.get(id);
-    if (!item) {
-      logger.warn("Item not found", { itemId: id });
-      return new Response("Not Found", { status: 404 });
-    }
-    return Response.json(item);
-  });
-}

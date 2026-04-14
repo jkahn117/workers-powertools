@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Metrics } from "../../src/metrics";
 import { MetricUnit } from "../../src/units";
 import type { MetricsBackend, MetricEntry, MetricContext } from "../../src/types";
+import type { PipelineBinding } from "../../src/pipelinesBackend";
 
 /** In-memory mock backend for testing — captures all written entries. */
 function makeMockBackend(): MetricsBackend & {
@@ -261,7 +262,7 @@ describe("Metrics / PipelinesBackend (integration)", () => {
     };
 
     const backend = new PipelinesBackend({
-      binding: fakePipeline as unknown as Pipeline<PipelineRecord>,
+      binding: fakePipeline as unknown as PipelineBinding,
     });
 
     const metrics = new Metrics({ namespace: "ecommerce", serviceName: "orders" });
@@ -288,7 +289,7 @@ describe("Metrics / PipelinesBackend (integration)", () => {
       send: vi.fn(async (records: unknown[]) => sent.push(...records)),
     };
     const backend = new PipelinesBackend({
-      binding: fakePipeline as unknown as Pipeline<PipelineRecord>,
+      binding: fakePipeline as unknown as PipelineBinding,
     });
 
     await backend.write(
@@ -314,7 +315,7 @@ describe("Metrics / PipelinesBackend (integration)", () => {
       send: vi.fn(async (records: unknown[]) => sent.push(...records)),
     };
     const backend = new PipelinesBackend({
-      binding: fakePipeline as unknown as Pipeline<PipelineRecord>,
+      binding: fakePipeline as unknown as PipelineBinding,
     });
 
     await backend.write(

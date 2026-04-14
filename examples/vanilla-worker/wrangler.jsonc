@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-08",
 
+  // Point wrangler's bundler at our tsconfig so it picks up
+  // experimentalDecorators: false, which causes esbuild to lower
+  // TC39 Stage 3 decorator syntax at bundle time.
+  "tsconfig": "./tsconfig.json",
+
   // Enable Workers Logs — structured JSON output from the logger is
   // queryable via the dashboard and API.
   "observability": {

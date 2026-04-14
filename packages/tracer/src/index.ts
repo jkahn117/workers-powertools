@@ -7,4 +7,4 @@
  */
 
 export { Tracer } from "./tracer";
-export type { TracerConfig, SpanContext } from "./types";
+export type { TracerConfig, SpanContext, CaptureMethodOptions } from "./types";

@@ -23,6 +23,30 @@ export interface TracerConfig extends PowertoolsConfig {
 }
 
 /**
+ * Options for the captureMethod() decorator factory.
+ */
+export interface CaptureMethodOptions {
+  /**
+   * Explicit span name. When omitted, defaults to "ClassName.methodName"
+   * derived automatically from the class and method at decoration time.
+   *
+   * @example
+   * @tracer.captureMethod({ name: "chargeCard" })
+   * async processPayment() { ... }
+   * // span_name: "chargeCard"
+   */
+  name?: string;
+
+  /**
+   * Whether to re-throw errors after recording them on the span.
+   * Set to false only when you intentionally want to swallow errors
+   * at the decorator boundary — almost always leave this as true.
+   * @default true
+   */
+  rethrowError?: boolean;
+}
+
+/**
  * Context for a custom application-level span.
  */
 export interface SpanContext {
