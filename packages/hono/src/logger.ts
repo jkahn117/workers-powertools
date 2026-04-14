@@ -13,7 +13,12 @@ import type { Logger } from "@workers-powertools/logger";
 export function injectLogger(logger: Logger): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     // Enrich the logger with CF properties, correlation ID, etc.
-    logger.addContext(c.req.raw, c.executionCtx as unknown as ExecutionContext);
+    // Pass c.env so POWERTOOLS_SERVICE_NAME and POWERTOOLS_LOG_LEVEL are applied.
+    logger.addContext(
+      c.req.raw,
+      c.executionCtx as unknown as ExecutionContext,
+      c.env as unknown as Record<string, unknown>,
+    );
 
     try {
       await next();

@@ -59,14 +59,24 @@ export interface PipelinesBackendOptions {
  * ```
  */
 export class PipelinesBackend implements MetricsBackend {
-  private readonly binding: PipelineBinding;
+  private readonly binding: PipelineBinding | undefined;
 
   constructor(options: PipelinesBackendOptions) {
+    // Guard against undefined bindings — common when the pipeline is not yet
+    // configured in wrangler.jsonc. Warn rather than throw so the Worker
+    // continues to serve requests; metrics are simply not written.
+    if (!options.binding) {
+      console.warn(
+        "[Metrics/PipelinesBackend] Pipeline binding is undefined. " +
+          'Add a "pipelines" binding in wrangler.jsonc and redeploy. ' +
+          "Metrics will not be recorded until the binding is configured.",
+      );
+    }
     this.binding = options.binding;
   }
 
   async write(entries: MetricEntry[], context: MetricContext): Promise<void> {
-    if (entries.length === 0) {
+    if (!this.binding || entries.length === 0) {
       return;
     }
 
@@ -75,7 +85,7 @@ export class PipelinesBackend implements MetricsBackend {
   }
 
   writeSync(entries: MetricEntry[], context: MetricContext): void {
-    if (entries.length === 0) {
+    if (!this.binding || entries.length === 0) {
       return;
     }
 
