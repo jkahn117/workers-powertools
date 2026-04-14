@@ -17,6 +17,9 @@
       // Lower this for high-traffic workers to manage cost.
       "head_sampling_rate": 1,
     },
+    "traces": {
+      "enabled": true,
+    },
   },
 
   // Powertools env vars — consumed via addContext(request, ctx, env)

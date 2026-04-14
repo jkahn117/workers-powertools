@@ -427,6 +427,236 @@ app.post(
 export default app;
 ```
 
+## Testing the API
+
+The examples expose a simple Items API. Once deployed, use these curl commands to exercise each endpoint and observe the correlated log and trace output in the Cloudflare Observability dashboard.
+
+```bash
+# List all items (empty on first deploy)
+curl https://YOUR_WORKER.workers.dev/items
+
+# Create an item
+curl -X POST https://YOUR_WORKER.workers.dev/items \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My First Deck"}'
+
+# Create with an idempotency key — safe to retry, will not create duplicates
+curl -X POST https://YOUR_WORKER.workers.dev/items \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deck-001" \
+  -d '{"name": "Idempotent Deck"}'
+
+# Replay the same request — returns the stored response without re-executing
+curl -X POST https://YOUR_WORKER.workers.dev/items \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deck-001" \
+  -d '{"name": "Idempotent Deck"}'
+
+# Get a specific item by ID (use an id from a create response)
+curl https://YOUR_WORKER.workers.dev/items/REPLACE_WITH_ID
+
+# Get a non-existent item — returns 404
+curl https://YOUR_WORKER.workers.dev/items/does-not-exist
+
+# Create a few items then list them all
+curl -X POST https://YOUR_WORKER.workers.dev/items \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Deck A"}' && \
+curl -X POST https://YOUR_WORKER.workers.dev/items \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Deck B"}' && \
+curl https://YOUR_WORKER.workers.dev/items
+```
+
+**What to watch for in the Observability dashboard:**
+
+- Each request produces a correlated set of log entries linked by `correlation_id` — the application log, the service-method span (`ItemService.create`), and the route span (`POST /items`)
+- The idempotency replay (same `Idempotency-Key`) short-circuits at the KV layer — you will see no `ItemService.create` span on the second call, only the route span, confirming the handler did not re-execute
+- The 404 response produces a `WARN` level log entry (`"message":"Item not found"`) alongside the trace span, making it easy to query for `level = "WARN"` to find all missing-item lookups
+
+## Querying Your Data
+
+Workers Powertools emits structured, correlated JSON to Workers Logs. Every request produces three types of entries that share the same `correlation_id`:
+
+```
+{"level":"INFO","message":"Listed items","service":"hono-worker","correlation_id":"9ec52cc3","colo":"ORD","count":0,...}
+{"type":"trace_span","span_name":"ItemService.list","correlation_id":"9ec52cc3","duration_ms":1,"success":true,...}
+{"type":"trace_span","span_name":"GET /items","correlation_id":"9ec52cc3","duration_ms":2,"success":true,...}
+```
+
+There are three tiers of tooling to make use of this data, in increasing order of setup effort.
+
+---
+
+### Tier 1: Workers Observability Dashboard
+
+**Zero setup. Works today. 7-day retention.**
+
+Workers Logs (GA) automatically ingests, indexes, and stores every structured JSON field you emit. Since you already have `observability.enabled: true` in your `wrangler.jsonc`, your data is already there.
+
+**Enable it** (one change if not already done):
+
+```jsonc
+// wrangler.jsonc
+{
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true }, // also enables auto-tracing of fetch + bindings
+  },
+}
+```
+
+**Navigate to your data:**
+
+`Cloudflare Dashboard → Workers & Pages → your Worker → Observability`
+
+Or the account-wide view across all Workers: `Workers & Pages → Observability`
+
+#### Views
+
+**Invocations** — groups all log entries from a single request together. Click any invocation to see the complete timeline: application log + service-method span + route span, all correlated by `correlation_id`. This is the primary debugging view.
+
+**Events** — chronological stream of individual log entries across all invocations. Good for spotting patterns across requests.
+
+**Traces** — (requires `observability.traces.enabled: true`) waterfall view of the auto-instrumented spans: handler invocation, outbound fetch calls, KV/R2/DO binding operations. Your custom `captureAsync` / `@tracer.captureMethod()` spans appear inline.
+
+#### Query Language
+
+The search bar accepts free text (searches all fields) or structured queries with autocomplete. Queries sync with the visual Query Builder sidebar so you can build with either.
+
+**Useful queries for Workers Powertools output:**
+
+```
+# Find all errors
+level = "ERROR"
+
+# Trace a specific request end-to-end
+correlation_id = "9ec52cc3dd4fcc1a"
+
+# Find slow service-method spans
+type = "trace_span" AND duration_ms > 200
+
+# Errors from a specific country
+level = "ERROR" AND country = "US"
+
+# All requests that created an item
+message = "Item created"
+
+# Failed spans only
+type = "trace_span" AND success = false
+
+# Filter by service (useful in multi-worker accounts)
+service = "hono-worker" AND level = "ERROR"
+
+# Requests from a specific Cloudflare colo
+colo = "ORD" AND type = "trace_span"
+```
+
+Operators: `=`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `startsWith`, `AND`, `OR`, `NOT`
+
+#### Visualizations
+
+Build charts directly in the Observability tab using the Query Builder:
+
+- **Error rate over time** — group by `level`, filter `level = "ERROR"`, chart count over time
+- **Span duration distribution** — filter `type = "trace_span"`, group by `span_name`, visualize p50/p95/p99
+- **Request volume by country** — group by `country`, count invocations
+- **Top slow operations** — filter `type = "trace_span"`, sort by `duration_ms` descending
+
+Charts are shareable — generate a URL to send a specific query or visualization to a teammate.
+
+#### REST API
+
+All Workers Logs data is queryable via the [Cloudflare API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/). Three endpoints:
+
+```bash
+# List all indexed field keys
+GET /accounts/{account_id}/workers/observability/keys
+
+# Run a structured query
+POST /accounts/{account_id}/workers/observability/query
+{
+  "query": "service = \"hono-worker\" AND level = \"ERROR\"",
+  "timeRange": { "from": "2026-04-14T00:00:00Z", "to": "2026-04-14T23:59:59Z" },
+  "limit": 100
+}
+
+# List unique values for a field (for building filter UIs)
+GET /accounts/{account_id}/workers/observability/values?key=colo
+```
+
+Useful for building internal dashboards, alerting pipelines, or automated incident reports.
+
+---
+
+### Tier 2: OTLP Export to an Observability Platform
+
+**~15 minutes setup. Better trace waterfall UI. Longer retention. Recommended for production.**
+
+Workers exports OpenTelemetry-compatible traces and logs to any OTLP/HTTP endpoint. Add to `wrangler.jsonc`:
+
+```jsonc
+{
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true,
+      "exporters": [
+        {
+          "type": "otlp/http",
+          "endpoint": "https://api.honeycomb.io", // or your platform
+          "headers": { "x-honeycomb-team": "YOUR_API_KEY" },
+        },
+      ],
+    },
+  },
+}
+```
+
+**Platform recommendations:**
+
+| Platform                                             | Best for                                                                     | Free tier             |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------- |
+| [Honeycomb](https://honeycomb.io)                    | Wide event querying, BubbleUp anomaly detection, best DX for structured logs | 20M events/month      |
+| [Axiom](https://axiom.co)                            | Fast ingestion, excellent Workers integration, low cost at scale             | 500GB/month           |
+| [Grafana Cloud](https://grafana.com/products/cloud/) | Full OSS stack (Loki + Tempo + Grafana), self-hostable                       | 50GB logs/month       |
+| [Sentry](https://sentry.io)                          | Error tracking + performance in one tool                                     | 5K transactions/month |
+
+With an OTLP destination you get a proper trace waterfall showing:
+
+- Platform auto-spans (handler, outbound fetch, KV, R2, DO) from Workers runtime
+- Your custom `captureAsync` / `@tracer.captureMethod()` spans nested inside
+- Full correlation between spans and application log entries via `correlation_id`
+
+---
+
+### Tier 3: LogPush → R2 for Long-Term Retention
+
+**~30 minutes setup. Unlimited retention. For compliance, billing, and trend analysis.**
+
+Workers Logs retains 7 days. For longer-term storage, set up a LogPush job to R2 (one-click in the Cloudflare dashboard: `Logs → Create a Logpush job → Workers trace events → R2`).
+
+Once in R2, query with:
+
+```bash
+# R2 SQL (serverless, Cloudflare-native)
+SELECT message, country, duration_ms
+FROM read_parquet('r2://your-bucket/workers-logs/*.parquet')
+WHERE level = 'ERROR'
+  AND timestamp > NOW() - INTERVAL '30' DAY
+
+# DuckDB locally (download R2 files first)
+duckdb -c "SELECT span_name, AVG(duration_ms), COUNT(*)
+           FROM 'workers-logs/*.json'
+           WHERE type = 'trace_span'
+           GROUP BY span_name ORDER BY 2 DESC"
+```
+
+Useful for: monthly error rate reports, billing analytics keyed on business events, capacity planning from request volume trends.
+
+---
+
 ## Development
 
 ### Prerequisites
