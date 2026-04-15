@@ -1,5 +1,12 @@
 # @workers-powertools/hono
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [85e8591]
+  - @workers-powertools/metrics@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
