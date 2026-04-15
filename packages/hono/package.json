@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/hono",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hono middleware adapters for Workers Powertools (logger, metrics, tracer, idempotency)",
   "license": "MIT",
   "type": "module",
@@ -27,7 +27,7 @@
     "@workers-powertools/commons": ">=0.1.0",
     "@workers-powertools/idempotency": ">=0.1.0",
     "@workers-powertools/logger": ">=0.1.0",
-    "@workers-powertools/metrics": ">=0.1.0",
+    "@workers-powertools/metrics": ">=0.2.0",
     "@workers-powertools/tracer": ">=0.1.0",
     "hono": "^4.12.12"
   },
