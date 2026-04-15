@@ -1,5 +1,15 @@
 # vanilla-worker
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies
+  - @workers-powertools/idempotency@0.1.1
+  - @workers-powertools/logger@0.1.1
+  - @workers-powertools/tracer@0.1.1
+  - @workers-powertools/metrics@0.2.1
+
 ## 0.0.2
 
 ### Patch Changes
