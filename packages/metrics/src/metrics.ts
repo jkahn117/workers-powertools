@@ -1,5 +1,5 @@
 import { PowertoolsBase } from "@workers-powertools/commons";
-import type { MetricsConfig, MetricEntry, MetricsBackend } from "./types";
+import type { MetricsConfig, MetricEntry, MetricsBackend, MetricContext } from "./types";
 import type { MetricUnit } from "./units";
 
 /**
@@ -26,24 +26,26 @@ import type { MetricUnit } from "./units";
  *   Without ExecutionContext, call metrics.flushSync().
  * - **Auto-flush:** set autoFlush: true to write each metric immediately
  *   on addMetric(). Use in alarm handlers and queue consumers.
+ *
+ * Concurrency safety: dimensions are passed per-metric via addMetric()
+ * rather than accumulated on the instance. This avoids shared mutable
+ * state that would be clobbered by concurrent requests in the same
+ * Workers isolate. Use defaultDimensions for static dimensions (environment,
+ * version) that apply to every metric.
  */
 export class Metrics extends PowertoolsBase {
   private readonly namespace: string;
   private readonly defaultDimensions: Record<string, string>;
   private readonly entries: MetricEntry[] = [];
-  private requestDimensions: Record<string, string> = {};
   private readonly autoFlush: boolean;
   private backend: MetricsBackend | undefined;
+  private correlationId: string | undefined;
 
   constructor(config?: MetricsConfig) {
     super(config);
 
-    // Resolve namespace: constructor → env var → default
     this.namespace = this.resolveConfig(
       config?.namespace,
-      // In Workers, env vars are accessed via bindings, not process.env.
-      // We read from globalThis for test compatibility; in production
-      // this will typically be undefined and the constructor value used.
       typeof globalThis !== "undefined"
         ? ((globalThis as Record<string, unknown>)["POWERTOOLS_METRICS_NAMESPACE"] as
             | string
@@ -63,6 +65,10 @@ export class Metrics extends PowertoolsBase {
    * Call this in your fetch handler (or per-request in Hono middleware)
    * after the env binding is available.
    *
+   * If the new backend wraps the same binding reference as the current
+   * one, the call is skipped — avoiding unnecessary object creation
+   * on every request when the binding doesn't change.
+   *
    * @example
    * // Pipelines (recommended)
    * metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
@@ -71,35 +77,60 @@ export class Metrics extends PowertoolsBase {
    * metrics.setBackend(new AnalyticsEngineBackend({ binding: env.ANALYTICS }));
    */
   setBackend(backend: MetricsBackend): void {
+    if (
+      this.backend &&
+      typeof (this.backend as unknown as Record<string, unknown>)["binding"] ===
+        "object" &&
+      (this.backend as unknown as Record<string, unknown>)["binding"] ===
+        (backend as unknown as Record<string, unknown>)["binding"]
+    ) {
+      return;
+    }
     this.backend = backend;
   }
 
   /**
-   * Add a dimension scoped to the current request or operation.
-   * Merged with defaultDimensions on each addMetric() call.
+   * Set the correlation ID for the current request context.
+   *
+   * Included in the MetricContext passed to backends on every flush,
+   * so metrics and logs can be correlated in the same query.
+   * Cleared automatically after each flush.
    */
-  addDimension(key: string, value: string): void {
-    this.requestDimensions[key] = value;
+  setCorrelationId(id: string): void {
+    this.correlationId = id;
   }
 
   /**
-   * Record a named business metric.
+   * Record a named business metric with per-call dimensions.
+   *
+   * Dimensions are passed explicitly per metric rather than accumulated
+   * on the instance. This avoids shared mutable state that would be
+   * clobbered by concurrent requests in the same Workers isolate.
+   *
+   * The entry's final dimensions are: defaultDimensions merged with
+   * the per-call dimensions (per-call keys override defaults).
    *
    * In buffered mode (default), the entry is queued until flush() or
    * flushSync() is called. In autoFlush mode, it is written immediately.
    *
    * @example
-   * metrics.addMetric("successfulBooking", MetricUnit.Count, 1);
-   * metrics.addMetric("orderLatency", MetricUnit.Milliseconds, 142);
+   * metrics.addMetric("successfulBooking", MetricUnit.Count, 1, { paymentMethod: "card" });
+   * metrics.addMetric("orderLatency", MetricUnit.Milliseconds, 142, { route: "/orders" });
+   * metrics.addMetric("itemCreated", MetricUnit.Count, 1);
    */
-  addMetric(name: string, unit: MetricUnit, value: number): void {
+  addMetric(
+    name: string,
+    unit: MetricUnit,
+    value: number,
+    dimensions?: Record<string, string>,
+  ): void {
     const entry: MetricEntry = {
       name,
       unit,
       value,
       dimensions: {
         ...this.defaultDimensions,
-        ...this.requestDimensions,
+        ...dimensions,
       },
       timestamp: Date.now(),
     };
@@ -130,9 +161,10 @@ export class Metrics extends PowertoolsBase {
     }
 
     const toWrite = [...this.entries];
+    const context = this.buildContext();
     this.clearEntries();
 
-    await this.backend!.write(toWrite, this.buildContext());
+    await this.backend!.write(toWrite, context);
   }
 
   /**
@@ -155,9 +187,10 @@ export class Metrics extends PowertoolsBase {
     }
 
     const toWrite = [...this.entries];
+    const context = this.buildContext();
     this.clearEntries();
 
-    this.backend!.writeSync(toWrite, this.buildContext());
+    this.backend!.writeSync(toWrite, context);
   }
 
   private writeSingle(entry: MetricEntry): void {
@@ -167,16 +200,22 @@ export class Metrics extends PowertoolsBase {
     this.backend!.writeSync([entry], this.buildContext());
   }
 
-  private buildContext() {
-    return {
+  private buildContext(): MetricContext {
+    const context: MetricContext = {
       namespace: this.namespace,
       serviceName: this.serviceName,
     };
+
+    if (this.correlationId) {
+      context.correlationId = this.correlationId;
+    }
+
+    return context;
   }
 
   private clearEntries(): void {
     this.entries.length = 0;
-    this.requestDimensions = {};
+    this.correlationId = undefined;
   }
 
   private assertBackend(): boolean {

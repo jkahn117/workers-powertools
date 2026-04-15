@@ -12,8 +12,11 @@ import { MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
  */
 export interface InjectMetricsOptions {
   /**
-   * Factory function called once per request to construct the backend
-   * from the Hono environment. Receives c.env so bindings are available.
+   * Factory function called once to construct the backend from the
+   * Hono environment. Receives c.env so bindings are available.
+   *
+   * The factory is only invoked when no backend is set, or when the
+   * binding reference has changed — not on every request.
    *
    * Defaults to a PipelinesBackend resolved from env.METRICS_PIPELINE
    * if that binding exists, otherwise no backend is set and a warning
@@ -32,13 +35,14 @@ export interface InjectMetricsOptions {
 /**
  * Hono middleware that instruments each request with business metrics.
  *
- * Resolves the metrics backend per-request via backendFactory (so env
- * bindings are available), adds route and method dimensions, records
- * request duration, and flushes asynchronously via ctx.waitUntil.
+ * Resolves the metrics backend on the first request (or when the binding
+ * reference changes), records request duration and count with per-metric
+ * dimensions (route, method, status), and flushes asynchronously via
+ * ctx.waitUntil.
  *
- * The default backendFactory resolves a PipelinesBackend from
- * env.METRICS_PIPELINE. Override backendFactory for custom backends
- * or a different binding name.
+ * Dimensions are passed per-metric rather than accumulated on the Metrics
+ * instance, avoiding concurrency hazards when multiple requests share the
+ * same isolate.
  *
  * @example
  * // Default — uses env.METRICS_PIPELINE automatically
@@ -61,8 +65,6 @@ export function injectMetrics(
   return createMiddleware(async (c, next) => {
     const env = c.env as Record<string, unknown>;
 
-    // Resolve backend via factory, or fall back to the default Pipelines
-    // binding (env.METRICS_PIPELINE) if present.
     if (options?.backendFactory) {
       metrics.setBackend(options.backendFactory(env));
     } else {
@@ -74,27 +76,27 @@ export function injectMetrics(
           }),
         );
       }
-      // If neither factory nor default binding exist, Metrics.flush() will
-      // emit a warning — no silent failure.
     }
 
     const startTime = Date.now();
 
-    // Use the matched Hono route pattern (e.g. "/orders/:id") as the
-    // dimension rather than the raw URL, so cardinality stays bounded.
-    metrics.addDimension("route", c.req.routePath);
-    metrics.addDimension("method", c.req.method);
-
     try {
       await next();
 
-      metrics.addDimension("status", String(c.res.status));
-    } finally {
-      const durationMs = Date.now() - startTime;
-      metrics.addMetric("request_duration", MetricUnit.Milliseconds, durationMs);
-      metrics.addMetric("request_count", MetricUnit.Count, 1);
+      const httpDimensions = {
+        route: c.req.routePath,
+        method: c.req.method,
+        status: String(c.res.status),
+      };
 
-      // Non-blocking flush — writes happen after the response is returned.
+      metrics.addMetric(
+        "request_duration",
+        MetricUnit.Milliseconds,
+        Date.now() - startTime,
+        httpDimensions,
+      );
+      metrics.addMetric("request_count", MetricUnit.Count, 1, httpDimensions);
+    } finally {
       c.executionCtx.waitUntil(metrics.flush());
     }
   });

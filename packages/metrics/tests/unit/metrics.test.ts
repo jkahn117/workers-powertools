@@ -4,7 +4,6 @@ import { MetricUnit } from "../../src/units";
 import type { MetricsBackend, MetricEntry, MetricContext } from "../../src/types";
 import type { PipelineBinding } from "../../src/pipelinesBackend";
 
-/** In-memory mock backend for testing — captures all written entries. */
 function makeMockBackend(): MetricsBackend & {
   writtenEntries: { entries: MetricEntry[]; context: MetricContext }[];
 } {
@@ -68,6 +67,43 @@ describe("Metrics / setBackend", () => {
 
     expect(backend.writtenEntries).toHaveLength(1);
   });
+
+  it("skips setBackend when the binding reference is the same", async () => {
+    const { PipelinesBackend } = await import("../../src/pipelinesBackend");
+    const fakeBinding = { send: vi.fn() };
+    const backend1 = new PipelinesBackend({
+      binding: fakeBinding as unknown as PipelineBinding,
+    });
+    const backend2 = new PipelinesBackend({
+      binding: fakeBinding as unknown as PipelineBinding,
+    });
+
+    const metrics = new Metrics({ namespace: "ns" });
+    metrics.setBackend(backend1);
+    metrics.setBackend(backend2);
+
+    const internalBackend = (metrics as unknown as { backend: MetricsBackend }).backend;
+    expect(internalBackend).toBe(backend1);
+  });
+
+  it("replaces backend when the binding reference differs", async () => {
+    const { PipelinesBackend } = await import("../../src/pipelinesBackend");
+    const binding1 = { send: vi.fn() };
+    const binding2 = { send: vi.fn() };
+    const backend1 = new PipelinesBackend({
+      binding: binding1 as unknown as PipelineBinding,
+    });
+    const backend2 = new PipelinesBackend({
+      binding: binding2 as unknown as PipelineBinding,
+    });
+
+    const metrics = new Metrics({ namespace: "ns" });
+    metrics.setBackend(backend1);
+    metrics.setBackend(backend2);
+
+    const internalBackend = (metrics as unknown as { backend: MetricsBackend }).backend;
+    expect(internalBackend).toBe(backend2);
+  });
 });
 
 describe("Metrics / addMetric", () => {
@@ -102,7 +138,7 @@ describe("Metrics / addMetric", () => {
   it("clears entries after flush", async () => {
     metrics.addMetric("a", MetricUnit.Count, 1);
     await metrics.flush();
-    await metrics.flush(); // second flush — no entries
+    await metrics.flush();
 
     expect(backend.writtenEntries).toHaveLength(1);
   });
@@ -116,13 +152,14 @@ describe("Metrics / addMetric", () => {
 });
 
 describe("Metrics / dimensions", () => {
-  it("addDimension includes key-value in entry dimensions", async () => {
+  it("per-metric dimensions are included in entry dimensions", async () => {
     const backend = makeMockBackend();
     const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
     metrics.setBackend(backend);
 
-    metrics.addDimension("paymentMethod", "card");
-    metrics.addMetric("successfulBooking", MetricUnit.Count, 1);
+    metrics.addMetric("successfulBooking", MetricUnit.Count, 1, {
+      paymentMethod: "card",
+    });
     await metrics.flush();
 
     const entry = backend.writtenEntries[0]?.entries[0];
@@ -144,20 +181,97 @@ describe("Metrics / dimensions", () => {
     expect(backend.writtenEntries[0]?.entries[0]?.dimensions["environment"]).toBe("prod");
   });
 
-  it("request dimensions are cleared after flush", async () => {
+  it("per-metric dimensions override defaultDimensions", async () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({
+      namespace: "ns",
+      serviceName: "svc",
+      defaultDimensions: { environment: "prod" },
+    });
+    metrics.setBackend(backend);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1, { environment: "staging" });
+    await metrics.flush();
+
+    expect(backend.writtenEntries[0]?.entries[0]?.dimensions["environment"]).toBe(
+      "staging",
+    );
+  });
+
+  it("different metrics can have different dimensions", async () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBackend(backend);
+
+    metrics.addMetric("request_duration", MetricUnit.Milliseconds, 42, {
+      route: "/orders",
+      method: "GET",
+      status: "200",
+    });
+    metrics.addMetric("itemCreated", MetricUnit.Count, 1, { paymentMethod: "card" });
+    await metrics.flush();
+
+    const entries = backend.writtenEntries[0]?.entries ?? [];
+    expect(entries[0]?.dimensions).toEqual({
+      route: "/orders",
+      method: "GET",
+      status: "200",
+    });
+    expect(entries[1]?.dimensions).toEqual({ paymentMethod: "card" });
+  });
+
+  it("no dimensions bleed between flushes", async () => {
     const backend = makeMockBackend();
     const metrics = new Metrics({ namespace: "ns" });
     metrics.setBackend(backend);
 
-    metrics.addDimension("route", "/orders");
+    metrics.addMetric("hits", MetricUnit.Count, 1, { route: "/orders" });
+    await metrics.flush();
+
+    metrics.addMetric("hits2", MetricUnit.Count, 1);
+    await metrics.flush();
+
+    expect(backend.writtenEntries[1]?.entries[0]?.dimensions["route"]).toBeUndefined();
+  });
+});
+
+describe("Metrics / correlationId", () => {
+  it("setCorrelationId includes correlation_id in context", async () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBackend(backend);
+
+    metrics.setCorrelationId("req-123");
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    await metrics.flush();
+
+    expect(backend.writtenEntries[0]?.context.correlationId).toBe("req-123");
+  });
+
+  it("correlationId is cleared after flush", async () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBackend(backend);
+
+    metrics.setCorrelationId("req-123");
     metrics.addMetric("hits", MetricUnit.Count, 1);
     await metrics.flush();
 
     metrics.addMetric("hits2", MetricUnit.Count, 1);
     await metrics.flush();
 
-    // Second flush should not carry forward the route dimension
-    expect(backend.writtenEntries[1]?.entries[0]?.dimensions["route"]).toBeUndefined();
+    expect(backend.writtenEntries[1]?.context.correlationId).toBeUndefined();
+  });
+
+  it("context omits correlationId when not set", async () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({ namespace: "ns", serviceName: "svc" });
+    metrics.setBackend(backend);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1);
+    await metrics.flush();
+
+    expect(backend.writtenEntries[0]?.context.correlationId).toBeUndefined();
   });
 });
 
@@ -247,8 +361,19 @@ describe("Metrics / autoFlush", () => {
     metrics.addMetric("hits", MetricUnit.Count, 1);
     await metrics.flush();
 
-    // Still only 1 write from the immediate autoFlush — flush() added nothing
     expect(backend.writtenEntries).toHaveLength(1);
+  });
+
+  it("per-metric dimensions work with autoFlush", () => {
+    const backend = makeMockBackend();
+    const metrics = new Metrics({ namespace: "ns", autoFlush: true });
+    metrics.setBackend(backend);
+
+    metrics.addMetric("hits", MetricUnit.Count, 1, { route: "/orders" });
+    metrics.addMetric("latency", MetricUnit.Milliseconds, 42, { route: "/payments" });
+
+    expect(backend.writtenEntries[0]?.entries[0]?.dimensions["route"]).toBe("/orders");
+    expect(backend.writtenEntries[1]?.entries[0]?.dimensions["route"]).toBe("/payments");
   });
 });
 
@@ -267,8 +392,7 @@ describe("Metrics / PipelinesBackend (integration)", () => {
 
     const metrics = new Metrics({ namespace: "ecommerce", serviceName: "orders" });
     metrics.setBackend(backend);
-    metrics.addDimension("environment", "prod");
-    metrics.addMetric("successfulBooking", MetricUnit.Count, 1);
+    metrics.addMetric("successfulBooking", MetricUnit.Count, 1, { environment: "prod" });
     await metrics.flush();
 
     expect(fakePipeline.send).toHaveBeenCalledOnce();

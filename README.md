@@ -9,7 +9,7 @@ A developer toolkit for observability and reliability best practices for Cloudfl
 | Package                                                     | Description                                                                                                             | npm                                     |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | [`@workers-powertools/logger`](./packages/logger)           | Structured JSON logging with Workers context enrichment, correlation IDs, log levels, debug sampling, and log buffering | `npm i @workers-powertools/logger`      |
-| [`@workers-powertools/metrics`](./packages/metrics)         | Custom application-level metrics via Analytics Engine with named metrics, dimensions, and non-blocking flush            | `npm i @workers-powertools/metrics`     |
+| [`@workers-powertools/metrics`](./packages/metrics)         | Named business metrics via Cloudflare Pipelines with per-call dimensions, correlation IDs, and non-blocking flush       | `npm i @workers-powertools/metrics`     |
 | [`@workers-powertools/tracer`](./packages/tracer)           | Request correlation and trace enrichment that complements Workers' built-in automatic tracing                           | `npm i @workers-powertools/tracer`      |
 | [`@workers-powertools/idempotency`](./packages/idempotency) | Exactly-once execution with pluggable persistence (KV, D1) for webhooks, queue consumers, and payment flows             | `npm i @workers-powertools/idempotency` |
 | [`@workers-powertools/commons`](./packages/commons)         | Shared types, utilities, and base classes used by all packages                                                          | `npm i @workers-powertools/commons`     |
@@ -206,10 +206,10 @@ export class SlideBuilder extends Agent<Env> {
 
 #### Buffered mode — Worker fetch handlers
 
-The default. Metrics are queued and written together after the response is sent, so they never add latency to the request.
+The default. Metrics are queued and written together after the response is sent, so they never add latency to the request. Dimensions are passed per-metric to avoid concurrency hazards in shared-isolate environments.
 
 ```typescript
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 
 const metrics = new Metrics({
   namespace: "ecommerce",
@@ -219,14 +219,17 @@ const metrics = new Metrics({
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    metrics.setBinding(env.ANALYTICS);
-    metrics.addDimension("endpoint", "/orders");
+    metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
 
     const start = Date.now();
     const result = await processOrder(request);
 
-    metrics.addMetric("orderLatency", MetricUnit.Milliseconds, Date.now() - start);
-    metrics.addMetric("orderValue", MetricUnit.None, result.total);
+    metrics.addMetric("orderLatency", MetricUnit.Milliseconds, Date.now() - start, {
+      endpoint: "/orders",
+    });
+    metrics.addMetric("orderValue", MetricUnit.None, result.total, {
+      endpoint: "/orders",
+    });
 
     // Non-blocking — writes happen after the response is returned
     ctx.waitUntil(metrics.flush());
@@ -235,29 +238,35 @@ export default {
 };
 ```
 
-#### `flushSync()` — Durable Object RPC methods with ExecutionContext
+#### `flushSync()` — Durable Object RPC methods without ExecutionContext
 
-When you have `this.ctx` available in a DO, you can pass it to `waitUntil`. If you don't, call `flushSync()` directly — `writeDataPoint()` is fire-and-forget on the Analytics Engine binding and does not block.
+When `this.ctx` is not available, call `flushSync()` directly — the backend's `writeSync()` method handles async delivery internally.
 
 ```typescript
 import { DurableObject } from "cloudflare:workers";
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 
 const metrics = new Metrics({ namespace: "slide-builder", serviceName: "api" });
 
 export class SlideBuilder extends DurableObject {
-  async generateSlides(prompt: string) {
-    metrics.setBinding(this.env.ANALYTICS);
-    metrics.addMetric("slidesGenerated", MetricUnit.Count, 1);
+  async generateSlides(prompt: string, correlationId: string) {
+    metrics.setBackend(new PipelinesBackend({ binding: this.env.METRICS_PIPELINE }));
+    metrics.setCorrelationId(correlationId);
+
+    metrics.addMetric("slidesGenerated", MetricUnit.Count, 1, {
+      prompt_length: String(prompt.length),
+    });
 
     const result = await buildSlides(prompt);
 
-    metrics.addMetric("slideCount", MetricUnit.None, result.slides.length);
+    metrics.addMetric("slideCount", MetricUnit.None, result.slides.length, {
+      prompt_length: String(prompt.length),
+    });
 
     // Option A: if this.ctx is available
     this.ctx.waitUntil(metrics.flush());
 
-    // Option B: if ctx is not available — writeDataPoint() is sync under the hood
+    // Option B: if ctx is not available
     metrics.flushSync();
 
     return result;
@@ -271,9 +280,8 @@ When there is no `ExecutionContext` at all (scheduled alarms, queue callbacks in
 
 ```typescript
 import { DurableObject } from "cloudflare:workers";
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 
-// autoFlush: true — safe for any context including alarm handlers
 const metrics = new Metrics({
   namespace: "slide-builder",
   serviceName: "api",
@@ -282,7 +290,7 @@ const metrics = new Metrics({
 
 export class SlideBuilder extends DurableObject {
   async alarm() {
-    metrics.setBinding(this.env.ANALYTICS);
+    metrics.setBackend(new PipelinesBackend({ binding: this.env.METRICS_PIPELINE }));
     metrics.addMetric("alarmFired", MetricUnit.Count, 1); // written immediately
     await runScheduledCleanup();
     metrics.addMetric("cleanupComplete", MetricUnit.Count, 1); // written immediately
@@ -298,8 +306,6 @@ export class SlideBuilder extends DurableObject {
 > | DO RPC with `this.ctx` available | Buffered | `this.ctx.waitUntil(metrics.flush())` |
 > | DO RPC without ctx | Buffered | `metrics.flushSync()` |
 > | DO alarm / queue consumer | Auto-flush | `autoFlush: true`, no flush call needed |
-
-````
 
 ### Tracer
 
@@ -326,7 +332,7 @@ export default {
     return new Response(JSON.stringify(result));
   },
 };
-````
+```
 
 ### Idempotency
 
@@ -374,7 +380,8 @@ export default {
 ```typescript
 import { Hono } from "hono";
 import { Logger } from "@workers-powertools/logger";
-import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
+import type { PipelineBinding } from "@workers-powertools/metrics";
 import { Tracer } from "@workers-powertools/tracer";
 import {
   injectLogger,
@@ -400,7 +407,12 @@ const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware — applied to every route.
 app.use(injectLogger(logger));
-app.use(injectMetrics(metrics));
+app.use(
+  injectMetrics(metrics, {
+    backendFactory: (env) =>
+      new PipelinesBackend({ binding: env.METRICS_PIPELINE as PipelineBinding }),
+  }),
+);
 app.use(injectTracer(tracer));
 
 app.get("/hello", (c) => {

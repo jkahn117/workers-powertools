@@ -85,7 +85,10 @@ class ItemService {
     const item: Item = { id, name: event.name, createdAt: new Date().toISOString() };
     this.store.set(id, item);
     logger.info("Item created", { itemId: id });
-    metrics.addMetric("itemCreated", MetricUnit.Count, 1);
+    metrics.addMetric("itemCreated", MetricUnit.Count, 1, {
+      route: "/items",
+      method: "POST",
+    });
     return item;
   }
 

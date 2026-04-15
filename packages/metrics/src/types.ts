@@ -96,7 +96,7 @@ export interface MetricEntry {
   name: string;
   unit: MetricUnit;
   value: number;
-  /** Merged default + request-scoped dimensions at the time of addMetric(). */
+  /** Merged default + per-call dimensions. */
   dimensions: Record<string, string>;
   timestamp: number;
 }
