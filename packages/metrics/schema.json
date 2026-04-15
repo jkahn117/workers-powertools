@@ -1,0 +1,12 @@
+{
+  "fields": [
+    { "name": "namespace", "type": "string", "required": true },
+    { "name": "service", "type": "string", "required": true },
+    { "name": "metric_name", "type": "string", "required": true },
+    { "name": "metric_unit", "type": "string", "required": true },
+    { "name": "metric_value", "type": "float64", "required": true },
+    { "name": "timestamp", "type": "timestamp", "required": true },
+    { "name": "correlation_id", "type": "string", "required": false },
+    { "name": "dimensions", "type": "json", "required": false }
+  ]
+}

@@ -402,7 +402,7 @@ describe("Metrics / PipelinesBackend (integration)", () => {
     expect(record["metric_name"]).toBe("successfulBooking");
     expect(record["metric_unit"]).toBe("Count");
     expect(record["metric_value"]).toBe(1);
-    expect(record["environment"]).toBe("prod");
+    expect(record["dimensions"]).toEqual({ environment: "prod" });
     expect(typeof record["timestamp"]).toBe("string");
   });
 

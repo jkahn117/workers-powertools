@@ -32,8 +32,21 @@
   },
 
   // Pipelines binding for business metrics (injectMetrics default backend).
-  // TODO: replace stream ID before deploying.
-  // Run: npx wrangler pipelines setup
+  // Setup: https://developers.cloudflare.com/pipelines/
+  //
+  // 1. Copy the reference schema:
+  //    cp node_modules/@workers-powertools/metrics/schema.json ./metrics-schema.json
+  //
+  // 2. Create the pipeline infrastructure:
+  //    npx wrangler r2 bucket create my-metrics
+  //    npx wrangler r2 bucket catalog enable my-metrics
+  //    npx wrangler pipelines streams create metrics-stream --schema-file metrics-schema.json
+  //    npx wrangler pipelines sinks create metrics-sink --type r2-data-catalog --bucket my-metrics ...
+  //    npx wrangler pipelines create metrics-pipeline --sql "INSERT INTO metrics_sink SELECT * FROM metrics_stream"
+  //
+  // 3. Replace <STREAM_ID> below with the stream name/ID from:
+  //    npx wrangler pipelines streams list
+  //
   // "pipelines": [
   //   {
   //     "pipeline": "<STREAM_ID>",

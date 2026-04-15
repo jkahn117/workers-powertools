@@ -1,21 +1,6 @@
 import type { MetricsBackend, MetricEntry, MetricContext } from "./types";
 
 /**
- * A single metric record as written to the Pipelines stream.
- * Named fields — no positional encoding.
- */
-interface PipelineMetricRecord {
-  namespace: string;
-  service: string;
-  metric_name: string;
-  metric_unit: string;
-  metric_value: number;
-  timestamp: string;
-  correlation_id?: string;
-  [dimension: string]: unknown;
-}
-
-/**
  * Minimal interface for a Cloudflare Pipelines binding.
  * Matches the Pipeline<T> interface from @cloudflare/workers-types
  * without importing it directly, keeping this package dependency-free.
@@ -40,9 +25,14 @@ export interface PipelinesBackendOptions {
 /**
  * Metrics backend that writes to Cloudflare Pipelines → R2/Iceberg.
  *
- * Each metric is emitted as a named-field JSON record. Unlike the
- * AnalyticsEngineBackend, field order is irrelevant — queries use real
- * column names, not positional aliases (blob3 AS provider).
+ * Each metric is emitted as a named-field JSON record with a stable schema:
+ * core fields (namespace, service, metric_name, metric_unit, metric_value,
+ * timestamp, correlation_id) are structured and validated by the stream,
+ * while dimensions are nested under a `dimensions` JSON field for flexibility.
+ *
+ * This means the stream schema stays stable even as you add new dimensions —
+ * no stream recreation or pipeline rebuild required. Query dimensions in R2 SQL
+ * with `map_extract(dimensions, 'key')` or bracket notation.
  *
  * Recommended for all new applications. Use AnalyticsEngineBackend only
  * when you have existing AE dashboards that cannot be migrated.
@@ -99,21 +89,23 @@ export class PipelinesBackend implements MetricsBackend {
   private buildRecords(
     entries: MetricEntry[],
     context: MetricContext,
-  ): PipelineMetricRecord[] {
+  ): Record<string, unknown>[] {
     return entries.map((entry) => {
-      const record: PipelineMetricRecord = {
+      const record: Record<string, unknown> = {
         namespace: context.namespace,
         service: context.serviceName,
         metric_name: entry.name,
         metric_unit: entry.unit,
         metric_value: entry.value,
         timestamp: new Date(entry.timestamp).toISOString(),
-        // Spread dimensions as top-level named fields
-        ...entry.dimensions,
       };
 
       if (context.correlationId) {
         record["correlation_id"] = context.correlationId;
+      }
+
+      if (Object.keys(entry.dimensions).length > 0) {
+        record["dimensions"] = { ...entry.dimensions };
       }
 
       return record;

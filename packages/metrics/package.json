@@ -14,6 +14,8 @@
   },
   "files": [
     "dist",
+    "schema.json",
+    "PIPELINES_SETUP.md",
     "LICENSE"
   ],
   "scripts": {
