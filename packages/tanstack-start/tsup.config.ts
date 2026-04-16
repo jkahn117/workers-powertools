@@ -6,7 +6,8 @@ export default defineConfig({
     "src/logger.ts",
     "src/metrics.ts",
     "src/tracer.ts",
-    "src/idempotency.ts",
+    "src/observability.ts",
+    "src/requestHelper.ts",
   ],
   format: ["esm"],
   dts: true,
@@ -18,7 +19,6 @@ export default defineConfig({
     "@workers-powertools/metrics",
     "@workers-powertools/metrics/pipelines",
     "@workers-powertools/tracer",
-    "@workers-powertools/idempotency",
-    "hono",
+    "@tanstack/start-client-core",
   ],
 });

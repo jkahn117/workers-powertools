@@ -10,6 +10,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./pipelines": {
+      "types": "./dist/pipelines.d.ts",
+      "import": "./dist/pipelines.js"
+    },
+    "./analytics-engine": {
+      "types": "./dist/analyticsEngine.d.ts",
+      "import": "./dist/analyticsEngine.js"
     }
   },
   "files": [

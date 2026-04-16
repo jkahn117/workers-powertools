@@ -1,11 +1,9 @@
 import { createMiddleware } from "hono/factory";
 import type { MiddlewareHandler } from "hono";
-import type {
-  Metrics,
-  MetricsBackend,
-  PipelineBinding,
-} from "@workers-powertools/metrics";
-import { MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
+import type { Metrics, MetricsBackend } from "@workers-powertools/metrics";
+import { MetricUnit } from "@workers-powertools/metrics";
+import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
+import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
 
 /**
  * Options for the injectMetrics middleware.

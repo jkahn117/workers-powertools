@@ -46,41 +46,48 @@ Workers are extremely sensitive to bundle size — cold start cost, CPU time lim
 - **Framework adapter packages** (`hono`, future `astro`, etc.) may depend on the framework itself as a `peerDependency` only — never as a bundled `dependency`.
 - **No transitive bloat.** Before adding any dependency, check its own dependency tree. A package that pulls in 20 transitive dependencies is not acceptable even if the package itself is small.
 - **Bundle size is a first-class metric.** Every package must have its gzipped ESM output size tracked. If a change increases any package's gzipped size by more than 10%, it must be explicitly justified in the PR.
+- **Prefer minimal changes over framework-heavy rewrites.**
 
 ### Enforcement
 
 Add a size check script to CI that fails if any package exceeds its budget:
 
-| Package                           | Gzipped size budget |
-| --------------------------------- | ------------------- |
-| `@workers-powertools/commons`     | 2 KB                |
-| `@workers-powertools/logger`      | 5 KB                |
-| `@workers-powertools/metrics`     | 4 KB                |
-| `@workers-powertools/tracer`      | 5 KB                |
-| `@workers-powertools/idempotency` | 6 KB                |
-| `@workers-powertools/hono`        | 4 KB                |
-| `@workers-powertools/agents`      | 2 KB                |
+| Package                              | Gzipped size budget |
+| ------------------------------------ | ------------------- |
+| `@workers-powertools/commons`        | 2 KB                |
+| `@workers-powertools/logger`         | 5 KB                |
+| `@workers-powertools/metrics`        | 4 KB                |
+| `@workers-powertools/tracer`         | 5 KB                |
+| `@workers-powertools/idempotency`    | 6 KB                |
+| `@workers-powertools/hono`           | 4 KB                |
+| `@workers-powertools/agents`         | 2 KB                |
+| `@workers-powertools/tanstack-start` | 4 KB                |
 
 These budgets are initial estimates and should be tightened once baseline measurements are established.
 
 Current baseline (post-implementation, for reference):
 
-| Package                           | Gzipped (actual) |
-| --------------------------------- | ---------------- |
-| `@workers-powertools/commons`     | 707 B            |
-| `@workers-powertools/logger`      | 3.5 KB           |
-| `@workers-powertools/metrics`     | 2.2 KB           |
-| `@workers-powertools/tracer`      | 1.4 KB           |
-| `@workers-powertools/idempotency` | 1.1 KB           |
-| `@workers-powertools/hono`        | 1.4 KB           |
-| `@workers-powertools/agents`      | 416 B            |
+| Package                              | Gzipped (actual) |
+| ------------------------------------ | ---------------- |
+| `@workers-powertools/commons`        | 707 B            |
+| `@workers-powertools/logger`         | 3.5 KB           |
+| `@workers-powertools/metrics`        | 2.2 KB           |
+| `@workers-powertools/tracer`         | 1.4 KB           |
+| `@workers-powertools/idempotency`    | 1.1 KB           |
+| `@workers-powertools/hono`           | 1.4 KB           |
+| `@workers-powertools/agents`         | 416 B            |
+| `@workers-powertools/tanstack-start` | 1.7 KB           |
 
 ### Checking Bundle Size
 
 To check the gzipped output size of a package after building:
 
 ```bash
-# From repo root — build first, then measure
+# From repo root — build first, then check all package budgets
+pnpm build
+pnpm size
+
+# Or measure manually:
 pnpm build
 find packages/*/dist -name "*.js" | xargs gzip -c | wc -c
 # Or per-package:
@@ -94,3 +101,9 @@ If you add or update dependencies remember to:
 - Update the appropriate lockfile (pnpm-lock.yaml).
 
 Following these practices ensures that the agent-assisted development workflow stays fast and dependable.
+
+## Keep Up-to-Date
+
+Whenever you make a change to the repo or a package, always:
+
+- Update the package README.md so that it stays accurate as the project evolves

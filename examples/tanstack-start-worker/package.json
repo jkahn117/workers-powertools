@@ -1,0 +1,35 @@
+{
+  "name": "tanstack-start-worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "pnpm run build && vite preview",
+    "deploy": "pnpm run build && wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "^1.32.3",
+    "@tanstack/react-router": "^1.168.22",
+    "@tanstack/react-start": "^1.167.41",
+    "@tanstack/start-client-core": "^1.167.0",
+    "@workers-powertools/logger": "workspace:*",
+    "@workers-powertools/metrics": "workspace:*",
+    "@workers-powertools/tanstack-start": "workspace:*",
+    "@workers-powertools/tracer": "workspace:*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8",
+    "wrangler": "^4.83.0"
+  }
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
-import type { PipelineBinding } from "@workers-powertools/metrics";
+import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
+import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
 import { injectMetrics } from "../../src/metrics";
 import { Hono } from "hono";
 

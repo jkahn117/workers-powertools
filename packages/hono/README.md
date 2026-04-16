@@ -12,6 +12,15 @@ Part of [Workers Powertools](../../README.md) — a developer toolkit for observ
 pnpm add @workers-powertools/hono
 ```
 
+If you only want a single adapter surface, subpath exports are available:
+
+```typescript
+import { injectLogger } from "@workers-powertools/hono/logger";
+import { injectMetrics } from "@workers-powertools/hono/metrics";
+import { injectTracer } from "@workers-powertools/hono/tracer";
+import { injectIdempotency } from "@workers-powertools/hono/idempotency";
+```
+
 ## Middleware
 
 ### `injectLogger(logger)`

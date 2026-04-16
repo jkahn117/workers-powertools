@@ -32,14 +32,13 @@ import { Hono } from "hono";
 
 import { Logger } from "@workers-powertools/logger";
 import { Tracer } from "@workers-powertools/tracer";
-import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
-import type { PipelineBinding } from "@workers-powertools/metrics";
-import {
-  injectLogger,
-  injectTracer,
-  injectMetrics,
-  injectIdempotency,
-} from "@workers-powertools/hono";
+import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
+import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
+import { injectIdempotency } from "@workers-powertools/hono/idempotency";
+import { injectLogger } from "@workers-powertools/hono/logger";
+import { injectMetrics } from "@workers-powertools/hono/metrics";
+import { injectTracer } from "@workers-powertools/hono/tracer";
 import { IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 

@@ -21,6 +21,14 @@ Part of [Workers Powertools](../../README.md) — a developer toolkit for observ
 pnpm add @workers-powertools/metrics
 ```
 
+Subpath exports are also available when you want to keep backend imports explicit:
+
+```typescript
+import { Metrics, MetricUnit } from "@workers-powertools/metrics";
+import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
+import { AnalyticsEngineBackend } from "@workers-powertools/metrics/analytics-engine";
+```
+
 ## Setting up Cloudflare Pipelines
 
 Metrics are written to [Cloudflare Pipelines](https://developers.cloudflare.com/pipelines/), which streams JSON records into an R2 bucket as Iceberg tables. You can then query them with [R2 SQL](https://developers.cloudflare.com/r2-sql/).

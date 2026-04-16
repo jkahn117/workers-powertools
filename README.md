@@ -16,9 +16,10 @@ A developer toolkit for observability and reliability best practices for Cloudfl
 
 ### Framework Adapters
 
-| Package                                       | Description                                                                                          | npm                              |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------- |
-| [`@workers-powertools/hono`](./packages/hono) | Hono middleware for logger, metrics, tracer, and idempotency — one package for all Hono integrations | `npm i @workers-powertools/hono` |
+| Package                                                           | Description                                                                                          | npm                                        |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`@workers-powertools/hono`](./packages/hono)                     | Hono middleware for logger, metrics, tracer, and idempotency — one package for all Hono integrations | `npm i @workers-powertools/hono`           |
+| [`@workers-powertools/tanstack-start`](./packages/tanstack-start) | TanStack Start request and server function middleware for logger, metrics, and tracer                | `npm i @workers-powertools/tanstack-start` |
 
 ## Quick Start
 
