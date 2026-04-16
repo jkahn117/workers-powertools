@@ -62,6 +62,7 @@ Add a size check script to CI that fails if any package exceeds its budget:
 | `@workers-powertools/hono`           | 4 KB                |
 | `@workers-powertools/agents`         | 2 KB                |
 | `@workers-powertools/tanstack-start` | 4 KB                |
+| `@workers-powertools/astro`          | 4 KB                |
 
 These budgets are initial estimates and should be tightened once baseline measurements are established.
 
@@ -77,6 +78,7 @@ Current baseline (post-implementation, for reference):
 | `@workers-powertools/hono`           | 1.4 KB           |
 | `@workers-powertools/agents`         | 416 B            |
 | `@workers-powertools/tanstack-start` | 1.7 KB           |
+| `@workers-powertools/astro`          | TBD              |
 
 ### Checking Bundle Size
 

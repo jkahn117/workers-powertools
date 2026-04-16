@@ -1,0 +1,55 @@
+{
+  "name": "@workers-powertools/astro",
+  "version": "0.1.0",
+  "description": "Astro middleware adapters for Workers Powertools (logger, metrics, tracer)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./logger": {
+      "types": "./dist/logger.d.ts",
+      "import": "./dist/logger.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js"
+    },
+    "./tracer": {
+      "types": "./dist/tracer.d.ts",
+      "import": "./dist/tracer.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "import": "./dist/observability.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "peerDependencies": {
+    "astro": ">=6.0.0",
+    "@workers-powertools/logger": ">=0.1.1",
+    "@workers-powertools/metrics": ">=0.3.0",
+    "@workers-powertools/tracer": ">=0.1.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "astro": "^6.1.7",
+    "@workers-powertools/logger": "workspace:*",
+    "@workers-powertools/metrics": "workspace:*",
+    "@workers-powertools/tracer": "workspace:*"
+  }
+}

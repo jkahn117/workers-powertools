@@ -43,6 +43,11 @@ const SIZE_BUDGETS = [
     filePath: "packages/tanstack-start/dist/index.js",
     budgetBytes: 4 * 1024,
   },
+  {
+    packageName: "@workers-powertools/astro",
+    filePath: "packages/astro/dist/index.js",
+    budgetBytes: 4 * 1024,
+  },
 ];
 
 function formatBytes(bytes) {

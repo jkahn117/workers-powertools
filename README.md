@@ -20,6 +20,7 @@ A developer toolkit for observability and reliability best practices for Cloudfl
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | [`@workers-powertools/hono`](./packages/hono)                     | Hono middleware for logger, metrics, tracer, and idempotency — one package for all Hono integrations | `npm i @workers-powertools/hono`           |
 | [`@workers-powertools/tanstack-start`](./packages/tanstack-start) | TanStack Start request and server function middleware for logger, metrics, and tracer                | `npm i @workers-powertools/tanstack-start` |
+| [`@workers-powertools/astro`](./packages/astro)                   | Astro middleware for logger, metrics, and tracer on Cloudflare Workers                               | `npm i @workers-powertools/astro`          |
 
 ## Quick Start
 
