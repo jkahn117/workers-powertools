@@ -1,5 +1,12 @@
 # vanilla-worker
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies
+  - @workers-powertools/metrics@0.3.1
+
 ## 0.0.4
 
 ### Patch Changes

@@ -32,6 +32,9 @@ jobs:
       - name: Check bundle sizes
         run: pnpm size
 
+      - name: Check exports map integrity
+        run: pnpm check-exports
+
       - name: Lint
         run: pnpm lint
 

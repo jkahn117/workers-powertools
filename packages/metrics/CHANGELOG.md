@@ -1,5 +1,29 @@
 # @workers-powertools/metrics
 
+## 0.3.1
+
+### Patch Changes
+
+- fix: publish subpath exports that were missing from npm packages
+
+  `@workers-powertools/hono@0.2.1` and `@workers-powertools/metrics@0.3.0` were
+  published before the subpath exports were added in the source repo, so the
+  published `package.json` `exports` map only contained `"."` and the dist only
+  contained `index.*` files.
+
+  **hono** — the following subpaths are now present in the published package:
+  - `@workers-powertools/hono/logger`
+  - `@workers-powertools/hono/metrics`
+  - `@workers-powertools/hono/tracer`
+  - `@workers-powertools/hono/idempotency`
+
+  **metrics** — the following subpaths are now present in the published package:
+  - `@workers-powertools/metrics/pipelines`
+  - `@workers-powertools/metrics/analytics-engine`
+
+  Consumers who were importing from `@workers-powertools/hono` (root) as a
+  workaround will continue to work without changes.
+
 ## 0.3.0
 
 ### Minor Changes

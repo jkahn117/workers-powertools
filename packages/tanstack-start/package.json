@@ -47,7 +47,7 @@
     "@tanstack/start-client-core": ">=1.167.0",
     "@workers-powertools/commons": ">=0.1.1",
     "@workers-powertools/logger": ">=0.1.1",
-    "@workers-powertools/metrics": ">=0.3.0",
+    "@workers-powertools/metrics": ">=0.3.1",
     "@workers-powertools/tracer": ">=0.1.1"
   },
   "devDependencies": {

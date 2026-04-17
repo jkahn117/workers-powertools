@@ -19,7 +19,8 @@
     "clean": "turbo run clean --filter=./packages/*",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "turbo run build && changeset publish"
+    "check-exports": "node scripts/check-exports.mjs",
+    "release": "turbo run build && node scripts/check-exports.mjs && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
