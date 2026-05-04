@@ -7,6 +7,7 @@ Part of [Workers Powertools](../../README.md) — a developer toolkit for observ
 ## Features
 
 - **Structured JSON output** — every log entry is a JSON object with `level`, `message`, `timestamp`, `service`, and any custom keys
+- **Wide events** — `createEvent()` accumulates context throughout a request and emits a single information-dense log entry with `duration_ms`
 - **Workers context enrichment** — `addContext(request, ctx, env)` injects CF properties (`colo`, `country`, `asn`), correlation ID, and runtime env vars
 - **Correlation IDs** — extracted from `x-request-id`, `x-correlation-id`, or `cf-ray` headers; auto-generated if missing
 - **Scoping** — `withComponent()` for module-level sub-loggers, `child()` for per-invocation isolation in Durable Objects, `withRpcContext()` for `using`-based auto-cleanup
@@ -49,6 +50,32 @@ export default {
     }
   },
 };
+```
+
+### Wide Events — one log per request
+
+```typescript
+const event = logger.createEvent("request handled");
+
+event.set({ user: { id: 42, plan: "pro" } });
+event.set({ cart: { items: 3, total: 9999 } });
+
+event.emit(); // single log entry with all fields + duration_ms
+```
+
+With Hono middleware (auto-create and auto-emit):
+
+```typescript
+import { injectLogger } from "@workers-powertools/hono";
+
+app.use(injectLogger(logger, { wideEvent: true }));
+
+app.get("/orders", (c) => {
+  const event = c.get("wideEvent");
+  event.set({ ordersFound: 42 });
+  return c.json(orders);
+  // event auto-emits with { status: 200, duration_ms: ... }
+});
 ```
 
 ### Scoping with `withComponent()` — module-level sub-loggers
@@ -103,6 +130,7 @@ The middleware calls `addContext()` before the handler and `clearTemporaryKeys()
 | Method                            | Description                                                          |
 | --------------------------------- | -------------------------------------------------------------------- |
 | `addContext(request, ctx?, env?)` | Enrich logger with CF properties, correlation ID, and env var config |
+| `createEvent(message, level?)`    | Create a wide event that accumulates context via `set()` and emits once via `emit()` |
 | `withComponent(name)`             | Create a sub-logger with a `component` field                         |
 | `child(extraKeys)`                | Create an isolated child logger (safe for concurrent DO RPC)         |
 | `withRpcContext(context)`         | Set RPC context with `using`-based auto-cleanup                      |

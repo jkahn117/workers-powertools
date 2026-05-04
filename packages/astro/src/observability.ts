@@ -6,8 +6,11 @@ import { injectMetrics } from "./metrics";
 import { injectTracer } from "./tracer";
 
 /**
- * Astro middleware that combines logger, tracer, and optional metrics
+ * Astro middleware that combines logger, optional tracer, and optional metrics
  * injection in a single middleware.
+ *
+ * The tracer is deprecated — pass `wideEvent: true` to use wide events
+ * instead of the tracer for request instrumentation.
  */
 export function injectObservability(
   options: InjectObservabilityOptions,
@@ -17,13 +20,19 @@ export function injectObservability(
       logger: options.logger,
       runtimeEnv: options.runtimeEnv,
       componentName: options.componentName,
-    }),
-    injectTracer({
-      tracer: options.tracer,
-      runtimeEnv: options.runtimeEnv,
-      requestSpanName: options.requestSpanName,
+      wideEvent: options.wideEvent,
     }),
   ];
+
+  if (options.tracer) {
+    middlewares.push(
+      injectTracer({
+        tracer: options.tracer,
+        runtimeEnv: options.runtimeEnv,
+        requestSpanName: options.requestSpanName,
+      }),
+    );
+  }
 
   if (options.metrics) {
     middlewares.push(

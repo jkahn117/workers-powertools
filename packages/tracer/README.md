@@ -1,6 +1,13 @@
-# @workers-powertools/tracer
+# @workers-powertools/tracer (deprecated)
 
-Request correlation and trace enrichment for Cloudflare Workers. Complements the platform's built-in automatic tracing with correlation ID propagation, custom application-level spans, and outbound fetch instrumentation.
+> **⚠️ Deprecated.** Cloudflare Workers does not expose an API for injecting custom spans into the built-in tracing system. The spans emitted by this package are structured log entries, not real trace spans in the Workers trace waterfall.
+>
+> **Migration:**
+> - For request instrumentation, use `Logger.createEvent()` (wide events) from `@workers-powertools/logger`.
+> - For correlation ID propagation on outbound fetch, use `captureFetch()` from `@workers-powertools/commons`.
+> - For correlation ID extraction, use `extractCorrelationId()` from `@workers-powertools/commons`.
+>
+> This package will continue to work but will not receive new features.
 
 Part of [Workers Powertools](../../README.md) — a developer toolkit for observability and reliability best practices on Cloudflare Workers, inspired by [Powertools for AWS Lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/).
 

@@ -10,7 +10,7 @@ A developer toolkit for observability and reliability best practices for Cloudfl
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | [`@workers-powertools/logger`](./packages/logger)           | Structured JSON logging with Workers context enrichment, correlation IDs, log levels, debug sampling, and log buffering | `npm i @workers-powertools/logger`      |
 | [`@workers-powertools/metrics`](./packages/metrics)         | Named business metrics via Cloudflare Pipelines with per-call dimensions, correlation IDs, and non-blocking flush       | `npm i @workers-powertools/metrics`     |
-| [`@workers-powertools/tracer`](./packages/tracer)           | Request correlation and trace enrichment that complements Workers' built-in automatic tracing                           | `npm i @workers-powertools/tracer`      |
+| [`@workers-powertools/tracer`](./packages/tracer)           | ~~Request correlation and trace enrichment~~ **(deprecated)** — use wide events + `captureFetch` instead              | `npm i @workers-powertools/tracer`      |
 | [`@workers-powertools/idempotency`](./packages/idempotency) | Exactly-once execution with pluggable persistence (KV, D1) for webhooks, queue consumers, and payment flows             | `npm i @workers-powertools/idempotency` |
 | [`@workers-powertools/commons`](./packages/commons)         | Shared types, utilities, and base classes used by all packages                                                          | `npm i @workers-powertools/commons`     |
 
@@ -69,6 +69,68 @@ Output:
   "country": "US",
   "path": "/orders"
 }
+```
+
+#### Wide Events — one log per request
+
+Instead of scattering `logger.info()` calls throughout a handler, accumulate context on a single wide event and emit once. This produces one information-dense log entry per request — easier to query, less noise.
+
+```typescript
+import { Logger } from "@workers-powertools/logger";
+
+const logger = new Logger({ serviceName: "checkout-api" });
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    logger.addContext(request, ctx);
+
+    const event = logger.createEvent("request handled");
+
+    event.set({ user: { id: 42, plan: "pro" } });
+    event.set({ cart: { items: 3, total: 9999 } });
+
+    const result = await processCheckout(request);
+    event.set({ payment: { method: "card", status: result.status } });
+
+    event.emit(); // single log entry with all fields + duration_ms
+    return Response.json(result);
+  },
+};
+```
+
+Output:
+
+```json
+{
+  "level": "INFO",
+  "message": "request handled",
+  "timestamp": "2026-04-08T12:00:00.000Z",
+  "service": "checkout-api",
+  "correlation_id": "abc-123-def",
+  "colo": "SJC",
+  "country": "US",
+  "user": { "id": 42, "plan": "pro" },
+  "cart": { "items": 3, "total": 9999 },
+  "payment": { "method": "card", "status": "success" },
+  "duration_ms": 42
+}
+```
+
+Wide events pair naturally with the framework middleware — see the [Hono section](#with-hono) for auto-create and auto-emit via `wideEvent: true`.
+
+#### Correlation ID propagation on outbound fetch
+
+Use `captureFetch` from `@workers-powertools/commons` to propagate correlation IDs on outbound requests:
+
+```typescript
+import { captureFetch, extractCorrelationId } from "@workers-powertools/commons";
+
+const correlationId = extractCorrelationId(request);
+
+const response = await captureFetch("https://api.example.com/notify", {
+  correlationId,
+  init: { method: "POST", body: JSON.stringify({ orderId: "123" }) },
+});
 ```
 
 #### Scoping with `withComponent()` — module-level sub-loggers
@@ -309,7 +371,14 @@ export class SlideBuilder extends DurableObject {
 > | DO RPC without ctx | Buffered | `metrics.flushSync()` |
 > | DO alarm / queue consumer | Auto-flush | `autoFlush: true`, no flush call needed |
 
-### Tracer
+### Tracer (deprecated)
+
+> **⚠️ Deprecated.** Cloudflare Workers does not expose an API for injecting custom spans into the built-in tracing system. The spans emitted by this package are structured log entries, not real trace spans. Use **wide events** (`Logger.createEvent()`) for request instrumentation and **`captureFetch()`** from `@workers-powertools/commons` for correlation ID propagation on outbound requests.
+
+The package will continue to work for existing users but will not receive new features. See the migration examples above in the [Wide Events](#wide-events--one-log-per-request) and [Correlation ID propagation](#correlation-id-propagation-on-outbound-fetch) sections.
+
+<details>
+<summary>Legacy usage (click to expand)</summary>
 
 ```typescript
 import { Tracer } from "@workers-powertools/tracer";
@@ -325,7 +394,6 @@ export default {
       return await chargeCustomer(request);
     });
 
-    // Correlation ID is automatically propagated
     await tracer.captureFetch("https://notifications.example.com/send", {
       method: "POST",
       body: JSON.stringify({ orderId: result.id }),
@@ -335,6 +403,8 @@ export default {
   },
 };
 ```
+
+</details>
 
 ### Idempotency
 
@@ -382,21 +452,20 @@ export default {
 ```typescript
 import { Hono } from "hono";
 import { Logger } from "@workers-powertools/logger";
+import type { WideEvent } from "@workers-powertools/logger";
 import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 import type { PipelineBinding } from "@workers-powertools/metrics";
-import { Tracer } from "@workers-powertools/tracer";
 import {
   injectLogger,
   injectMetrics,
-  injectTracer,
   injectIdempotency,
 } from "@workers-powertools/hono";
+import type { WideEventVariables } from "@workers-powertools/hono";
 import { IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
 const logger = new Logger({ serviceName: "my-api" });
 const metrics = new Metrics({ namespace: "my-api", serviceName: "my-api" });
-const tracer = new Tracer({ serviceName: "my-api" });
 
 // Lazily initialised on first request (env bindings unavailable at module scope).
 let persistenceLayer: KVPersistenceLayer | undefined;
@@ -405,20 +474,22 @@ const idempotencyConfig = new IdempotencyConfig({
   expiresAfterSeconds: 3600,
 });
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: WideEventVariables }>();
 
 // Global middleware — applied to every route.
-app.use(injectLogger(logger));
+// wideEvent: true creates a request-scoped event, accessible via c.get("wideEvent"),
+// and auto-emits it after the handler completes.
+app.use(injectLogger(logger, { wideEvent: true }));
 app.use(
   injectMetrics(metrics, {
     backendFactory: (env) =>
       new PipelinesBackend({ binding: env.METRICS_PIPELINE as PipelineBinding }),
   }),
 );
-app.use(injectTracer(tracer));
 
 app.get("/hello", (c) => {
-  logger.info("Hello endpoint hit");
+  const event = c.get("wideEvent");
+  event.set({ greeting: "hello" });
   return c.json({ message: "hello" });
 });
 
@@ -433,6 +504,8 @@ app.post(
   },
   async (c) => {
     const body = await c.req.json<{ orderId: string }>();
+    const event = c.get("wideEvent");
+    event.set({ orderId: body.orderId });
     // Handler only runs once per unique Idempotency-Key header value.
     return c.json({ orderId: body.orderId, status: "created" }, 201);
   },

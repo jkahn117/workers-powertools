@@ -11,6 +11,7 @@ import type {
   RpcContextHandle,
 } from "./types";
 import { LOG_LEVEL_VALUE } from "./types";
+import { WideEvent } from "./wideEvent";
 
 /**
  * Shared mutable state between a parent Logger and any scoped children
@@ -312,6 +313,29 @@ export class Logger extends PowertoolsBase {
         }
       },
     };
+  }
+
+  /**
+   * Create a wide event that accumulates context over a unit of work
+   * and emits a single comprehensive log entry when done.
+   *
+   * Use this instead of multiple `logger.info()` calls to produce one
+   * information-dense log entry per request, job, or workflow step.
+   *
+   * The event inherits this logger's context (correlation ID, CF properties,
+   * component, persistent/temporary keys) at emit time.
+   *
+   * @param message - Summary message for the wide event log entry.
+   * @param level - Log level for the emitted entry. Defaults to "INFO".
+   *
+   * @example
+   * const event = logger.createEvent("request handled");
+   * event.set({ user: { id: 42, plan: "pro" } });
+   * event.set({ cart: { items: 3, total: 9999 } });
+   * event.emit(); // one log entry with all fields + duration_ms
+   */
+  createEvent(message: string, level?: LogLevel): WideEvent {
+    return new WideEvent(this, message, level);
   }
 
   trace(message: string, extra?: Record<string, unknown>): void {
