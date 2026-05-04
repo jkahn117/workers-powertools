@@ -8,7 +8,7 @@
  * @example
  * ```ts
  * const response = await captureFetch("https://api.example.com/notify", {
- *   correlationId: logger.getCorrelationId(),
+ *   correlationId: extractCorrelationId(request),
  *   init: { method: "POST", body: JSON.stringify({ orderId: "123" }) },
  * });
  * ```

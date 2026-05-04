@@ -1,4 +1,3 @@
-import { extractCorrelationId } from "@workers-powertools/commons";
 import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
 import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
 import type { StartRequestArgs, StartRequestContext } from "./types";
@@ -44,7 +43,7 @@ export async function withStartRequestObservability<TContext>(
 
   const correlationId = tracer
     ? tracer.getCorrelationId()
-    : extractCorrelationId(request);
+    : requestLogger.getCorrelationId();
 
   if (metrics) {
     if (args.metricsBackendFactory) {
