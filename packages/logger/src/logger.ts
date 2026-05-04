@@ -517,7 +517,7 @@ export class Logger extends PowertoolsBase {
         for (const x of p) { x.regex.lastIndex = 0; r = r.replace(x.regex, x.replacement); }
         o[k] = r;
       } else if (v && typeof v === "object") {
-        if (Array.isArray(v)) { for (const el of v) { if (el && typeof el === "object") this.redact(el as Record<string, unknown>); } }
+        if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) { const el = v[i]; if (typeof el === "string") { let r = el; for (const x of p) { x.regex.lastIndex = 0; r = r.replace(x.regex, x.replacement); } v[i] = r; } else if (el && typeof el === "object") { this.redact(el as Record<string, unknown>); } } }
         else this.redact(v as Record<string, unknown>);
       }
     }

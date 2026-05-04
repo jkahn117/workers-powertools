@@ -39,6 +39,7 @@ export function injectLogger(
   options?: InjectLoggerOptions,
 ): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
+    logger.resetContext();
     logger.addContext(
       c.req.raw,
       c.executionCtx as unknown as ExecutionContext,
