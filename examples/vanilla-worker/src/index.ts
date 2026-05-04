@@ -10,13 +10,9 @@
  *
  * ─── POWERTOOLS INTEGRATION ──────────────────────────────────────────────────
  *
- * Logger  — addContext(request, ctx, env) enriches all logs with CF properties,
- *           correlation ID, and runtime env vars (POWERTOOLS_SERVICE_NAME etc.)
- *
- * Tracer  — @tracer.captureMethod() wraps each ItemService method in a named
- *           span automatically. TC39 Stage 3 decorator syntax is enabled via
- *           experimentalDecorators: false in tsconfig.json — esbuild/wrangler
- *           lowers the syntax at bundle time.
+ * Logger  — resetContext() + addContext(request, ctx, env) at the start of each
+ *           request prevents state leaking between requests on a reused logger.
+ *           createEvent() accumulates context and emits a single wide event.
  *
  * Metrics — PipelinesBackend writes named-field JSON records to Cloudflare
  *           Pipelines → R2/Iceberg, queryable by column name via R2 SQL.
@@ -24,11 +20,12 @@
  * Idempotency — makeIdempotent() wraps ItemService.create so duplicate POSTs
  *               with the same Idempotency-Key header return the stored result.
  *
+ * captureFetch — propagates correlation ID on outbound fetch calls.
+ *
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { Logger } from "@workers-powertools/logger";
-import { Tracer } from "@workers-powertools/tracer";
 import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 import type { PipelineBinding } from "@workers-powertools/metrics";
 import { makeIdempotent, IdempotencyConfig } from "@workers-powertools/idempotency";
@@ -46,7 +43,6 @@ type CreateItemEvent = { idempotencyKey: string; name: string };
 
 // serviceName / logLevel / namespace resolved from env vars at runtime.
 const logger = new Logger();
-const tracer = new Tracer();
 const metrics = new Metrics();
 
 // Lazily initialised on first request — env bindings unavailable at module scope.
@@ -60,31 +56,21 @@ const idempotencyConfig = new IdempotencyConfig({
 /**
  * ItemService encapsulates the business logic for the items resource.
  *
- * Each method is decorated with @tracer.captureMethod(), which automatically
- * wraps it in a named span: "ItemService.list", "ItemService.create",
- * "ItemService.getById". No manual captureAsync() boilerplate required.
- *
- * TC39 Stage 3 decorator syntax — requires experimentalDecorators: false
- * and target: ES2022 in tsconfig.json so esbuild lowers the syntax at
- * bundle time (see tsconfig.json).
+ * Methods are plain async functions — timing and context are captured
+ * by the wide event on the outer handler instead of per-method spans.
  */
 class ItemService {
   // In-memory store — replace with KV or D1 in production.
   private readonly store = new Map<string, Item>();
 
-  @tracer.captureMethod()
   async list(): Promise<Item[]> {
-    const all = Array.from(this.store.values());
-    logger.info("Listed items", { count: all.length });
-    return all;
+    return Array.from(this.store.values());
   }
 
-  @tracer.captureMethod()
   async create(event: CreateItemEvent): Promise<Item> {
     const id = crypto.randomUUID();
     const item: Item = { id, name: event.name, createdAt: new Date().toISOString() };
     this.store.set(id, item);
-    logger.info("Item created", { itemId: id });
     metrics.addMetric("itemCreated", MetricUnit.Count, 1, {
       route: "/items",
       method: "POST",
@@ -92,19 +78,13 @@ class ItemService {
     return item;
   }
 
-  @tracer.captureMethod()
   async getById(id: string): Promise<Item | undefined> {
-    const item = this.store.get(id);
-    if (!item) logger.warn("Item not found", { itemId: id });
-    return item;
+    return this.store.get(id);
   }
 }
 
 const service = new ItemService();
 
-// makeIdempotent wraps service.create. The span from @tracer.captureMethod()
-// only fires on first execution — duplicate requests short-circuit before
-// re-entering the method, so no orphaned spans on cache hits.
 const createItemIdempotent = makeIdempotent(
   (event: CreateItemEvent) => service.create(event),
   {
@@ -123,38 +103,54 @@ export default {
     const { method } = request;
     const path = url.pathname;
 
-    // Apply runtime env-var config (POWERTOOLS_SERVICE_NAME, POWERTOOLS_LOG_LEVEL).
+    // Reset per-request state, then enrich with current request context.
+    logger.resetContext();
     logger.addContext(request, ctx, env as unknown as Record<string, unknown>);
-    tracer.addContext(request, ctx, env as unknown as Record<string, unknown>);
     metrics.setBackend(new PipelinesBackend({ binding: env.METRICS_PIPELINE }));
+
+    // Create a wide event that accumulates context throughout the request.
+    const event = logger.createEvent("request handled");
+    event.set({ method, path });
 
     try {
       if (method === "GET" && path === "/items") {
-        return Response.json(await service.list());
+        const items = await service.list();
+        event.set({ itemCount: items.length });
+        return Response.json(items);
       }
 
       if (method === "POST" && path === "/items") {
         const body = (await request.json()) as { name?: string };
         if (!body.name) {
+          event.set({ status: 400, error: "missing_name" });
           return new Response("Missing required field: name", { status: 400 });
         }
         persistenceLayer ??= new KVPersistenceLayer({ binding: env.IDEMPOTENCY_KV });
         const idempotencyKey = request.headers.get("Idempotency-Key") ?? body.name;
         const item = await createItemIdempotent({ idempotencyKey, name: body.name });
+        event.set({ itemId: item.id, action: "create", status: 201 });
         return Response.json(item, { status: 201 });
       }
 
       const itemMatch = path.match(/^\/items\/([^/]+)$/);
       if (method === "GET" && itemMatch) {
         const item = await service.getById(itemMatch[1] ?? "");
-        return item ? Response.json(item) : new Response("Not Found", { status: 404 });
+        if (!item) {
+          event.set({ itemId: itemMatch[1], found: false, status: 404 });
+          return new Response("Not Found", { status: 404 });
+        }
+        event.set({ itemId: item.id, found: true, status: 200 });
+        return Response.json(item);
       }
 
+      event.set({ status: 404 });
       return new Response("Not Found", { status: 404 });
     } catch (error) {
       logger.error("Unhandled error", error as Error);
+      event.set({ status: 500, error: (error as Error).message });
       return new Response("Internal Server Error", { status: 500 });
     } finally {
+      event.emit();
       ctx.waitUntil(metrics.flush());
     }
   },

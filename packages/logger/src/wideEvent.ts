@@ -95,6 +95,11 @@ export class WideEvent {
       case "CRITICAL":
         this.logger.critical(this.message, extra);
         break;
+      default:
+        console.warn(
+          `[WideEvent] emit() called with unsupported level "${this.level}" — defaulting to INFO.`,
+        );
+        this.logger.info(this.message, extra);
     }
   }
 

@@ -71,19 +71,31 @@ export class D1PersistenceLayer implements PersistenceLayer {
   }
 
   async putRecord(record: IdempotencyRecord): Promise<void> {
-    await this.binding
-      .prepare(
-        `INSERT INTO ${this.tableName} (idempotency_key, status, expires_at, result, payload_hash)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        record.idempotencyKey,
-        record.status,
-        record.expiresAt,
-        record.result !== undefined ? JSON.stringify(record.result) : null,
-        record.payloadHash ?? null,
-      )
-      .run();
+    try {
+      await this.binding
+        .prepare(
+          `INSERT INTO ${this.tableName} (idempotency_key, status, expires_at, result, payload_hash)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          record.idempotencyKey,
+          record.status,
+          record.expiresAt,
+          record.result !== undefined ? JSON.stringify(record.result) : null,
+          record.payloadHash ?? null,
+        )
+        .run();
+    } catch (error) {
+      // D1 throws on UNIQUE constraint violation when a non-expired
+      // record already exists — surface this as an IdempotencyConflictError
+      // so callers get the expected error type.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("UNIQUE constraint failed") || message.includes("SQLITE_CONSTRAINT")) {
+        const { IdempotencyConflictError } = await import("./makeIdempotent");
+        throw new IdempotencyConflictError(record.idempotencyKey);
+      }
+      throw error;
+    }
   }
 
   async updateRecord(record: IdempotencyRecord): Promise<void> {

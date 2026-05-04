@@ -137,7 +137,9 @@ export class Tracer extends PowertoolsBase {
    * }
    */
   captureMethod(options?: CaptureMethodOptions) {
-    const tracer = this;
+    // Arrow function preserves `this` (the Tracer instance) from the
+    // enclosing method without requiring a `const tracer = this` alias.
+    const captureAsync = this.captureAsync.bind(this);
     const rethrowError = options?.rethrowError ?? true;
 
     return function <TArgs extends unknown[], T>(
@@ -166,7 +168,7 @@ export class Tracer extends PowertoolsBase {
         const resolvedName = spanName ?? methodName;
 
         try {
-          return await tracer.captureAsync(resolvedName, async () => {
+          return await captureAsync(resolvedName, async () => {
             return await originalMethod.apply(this, args);
           });
         } catch (error) {

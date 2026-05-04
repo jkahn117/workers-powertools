@@ -3,7 +3,7 @@
  *
  * The same Items API as vanilla-worker, built with Hono.
  * Compare the DX: Hono middleware handles cross-cutting concerns while
- * @tracer.captureMethod() decorates individual service methods.
+ * wide events accumulate per-request context into a single log entry.
  *
  *   GET  /items        — list all items
  *   POST /items        — create an item (idempotent via Idempotency-Key header)
@@ -13,12 +13,8 @@
  *
  * Logger  — injectLogger middleware calls addContext on every request.
  *           Env vars (POWERTOOLS_SERVICE_NAME etc.) applied automatically.
- *
- * Tracer  — injectTracer wraps every Hono handler in a route-level span.
- *           @tracer.captureMethod() adds finer-grained service-method spans
- *           nested inside the route span — producing a two-level span tree
- *           with no manual captureAsync() calls. TC39 Stage 3 decorator
- *           syntax enabled via experimentalDecorators: false in tsconfig.json.
+ *           wideEvent: true creates a request-scoped WideEvent accessible via
+ *           c.get("wideEvent") that auto-emits after the handler completes.
  *
  * Metrics — injectMetrics resolves PipelinesBackend from env.METRICS_PIPELINE
  *           and flushes after every response.
@@ -31,14 +27,13 @@
 import { Hono } from "hono";
 
 import { Logger } from "@workers-powertools/logger";
-import { Tracer } from "@workers-powertools/tracer";
 import { Metrics, MetricUnit } from "@workers-powertools/metrics";
 import { PipelinesBackend } from "@workers-powertools/metrics/pipelines";
 import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
 import { injectIdempotency } from "@workers-powertools/hono/idempotency";
 import { injectLogger } from "@workers-powertools/hono/logger";
 import { injectMetrics } from "@workers-powertools/hono/metrics";
-import { injectTracer } from "@workers-powertools/hono/tracer";
+import type { WideEventVariables } from "@workers-powertools/hono/logger";
 import { IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
@@ -53,7 +48,6 @@ type Item = { id: string; name: string; createdAt: string };
 
 // serviceName / logLevel / namespace resolved from env vars at runtime.
 const logger = new Logger();
-const tracer = new Tracer();
 const metrics = new Metrics();
 
 // Lazily initialised on first request — env bindings unavailable at module scope.
@@ -67,34 +61,21 @@ const idempotencyConfig = new IdempotencyConfig({
 /**
  * ItemService encapsulates the business logic for the items resource.
  *
- * @tracer.captureMethod() decorates each method with a named span:
- *   "ItemService.list", "ItemService.create", "ItemService.getById"
- *
- * These are nested inside the route-level span created by injectTracer,
- * giving a two-level span tree per request:
- *   GET /items
- *     └── ItemService.list
- *
- * TC39 Stage 3 decorator syntax — requires experimentalDecorators: false
- * and target: ES2022 in tsconfig.json (see tsconfig.json).
+ * Methods are plain async functions — timing and context are captured
+ * by the wide event on the outer handler instead of per-method spans.
  */
 class ItemService {
   // In-memory store — replace with KV or D1 in production.
   private readonly store = new Map<string, Item>();
 
-  @tracer.captureMethod()
   async list(): Promise<Item[]> {
-    const all = Array.from(this.store.values());
-    logger.info("Listed items", { count: all.length });
-    return all;
+    return Array.from(this.store.values());
   }
 
-  @tracer.captureMethod()
   async create(name: string): Promise<Item> {
     const id = crypto.randomUUID();
     const item: Item = { id, name, createdAt: new Date().toISOString() };
     this.store.set(id, item);
-    logger.info("Item created", { itemId: id });
     metrics.addMetric("itemCreated", MetricUnit.Count, 1, {
       route: "/items",
       method: "POST",
@@ -102,24 +83,20 @@ class ItemService {
     return item;
   }
 
-  @tracer.captureMethod()
   async getById(id: string): Promise<Item | undefined> {
-    const item = this.store.get(id);
-    if (!item) logger.warn("Item not found", { itemId: id });
-    return item;
+    return this.store.get(id);
   }
 }
 
 const service = new ItemService();
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: WideEventVariables }>();
 
 // ── Global middleware ────────────────────────────────────────────────────────
-// Ordered: logger first (correlation ID available to all downstream),
-// then tracer (route-level span wraps handler + service spans),
-// then metrics (records duration after handler + service complete).
-app.use(injectLogger(logger));
-app.use(injectTracer(tracer));
+// Ordered: logger first (correlation ID + wide event available to all downstream),
+// then metrics (records duration after handler complete).
+// wideEvent: true creates a request-scoped event that auto-emits on response.
+app.use(injectLogger(logger, { wideEvent: true }));
 app.use(
   injectMetrics(metrics, {
     backendFactory: (env) =>
@@ -130,13 +107,13 @@ app.use(
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 // GET /items
-// Span tree: "GET /items" → "ItemService.list"
 app.get("/items", async (c) => {
-  return c.json(await service.list());
+  const items = await service.list();
+  c.get("wideEvent").set({ itemCount: items.length });
+  return c.json(items);
 });
 
 // POST /items — idempotency middleware guards this route only.
-// Span tree: "POST /items" → "ItemService.create" (first execution only)
 app.post(
   "/items",
   async (c, next) => {
@@ -148,15 +125,21 @@ app.post(
     if (!body.name) {
       return c.json({ error: "Missing required field: name" }, 400);
     }
-    return c.json(await service.create(body.name), 201);
+    const item = await service.create(body.name);
+    c.get("wideEvent").set({ itemId: item.id, action: "create" });
+    return c.json(item, 201);
   },
 );
 
 // GET /items/:id
-// Span tree: "GET /items/:id" → "ItemService.getById"
 app.get("/items/:id", async (c) => {
   const item = await service.getById(c.req.param("id"));
-  return item ? c.json(item) : c.json({ error: "Not Found" }, 404);
+  if (!item) {
+    c.get("wideEvent").set({ itemId: c.req.param("id"), found: false });
+    return c.json({ error: "Not Found" }, 404);
+  }
+  c.get("wideEvent").set({ itemId: item.id, found: true });
+  return c.json(item);
 });
 
 export default app;

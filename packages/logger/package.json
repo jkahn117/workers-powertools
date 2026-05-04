@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./redact": {
+      "types": "./dist/redactPatterns.d.ts",
+      "import": "./dist/redactPatterns.js"
     }
   },
   "files": [

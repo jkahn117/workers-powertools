@@ -13,4 +13,6 @@ export type {
   LogEntry,
   RpcContext,
   RpcContextHandle,
+  StructuredErrorInfo,
 } from "./types";
+export type { RedactConfig } from "./redact";

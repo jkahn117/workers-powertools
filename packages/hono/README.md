@@ -23,15 +23,31 @@ import { injectIdempotency } from "@workers-powertools/hono/idempotency";
 
 ## Middleware
 
-### `injectLogger(logger)`
+### `injectLogger(logger, options?)`
 
 Enriches the logger with request context (CF properties, correlation ID) before the handler runs, and clears temporary keys afterward.
 
+When `wideEvent` is enabled, creates a request-scoped `WideEvent` accessible via `c.get("wideEvent")` that auto-emits with `duration_ms` after the handler completes.
+
 ```typescript
 import { injectLogger } from "@workers-powertools/hono";
+import type { WideEventVariables } from "@workers-powertools/hono/logger";
 
+// Basic — no wide event
 app.use(injectLogger(logger));
+
+// With wide events (recommended)
+const app = new Hono<{ Variables: WideEventVariables }>();
+app.use(injectLogger(logger, { wideEvent: true }));
+
+app.get("/orders", (c) => {
+  c.get("wideEvent").set({ ordersFound: 42 });
+  return c.json(orders);
+  // wide event auto-emits: { message: "GET /orders", ordersFound: 42, duration_ms: ... }
+});
 ```
+
+`wideEvent` accepts `true`, a static string, or a `(request, routePath) => string` function for custom messages.
 
 ### `injectMetrics(metrics, options?)`
 
@@ -55,7 +71,9 @@ app.use(
 
 The backend is only created once per binding reference — `setBackend()` is idempotent when the underlying binding hasn't changed.
 
-### `injectTracer(tracer)`
+### `injectTracer(tracer)` *(deprecated)*
+
+> **Deprecated:** Cloudflare Workers has no API for custom spans. Use wide events via `injectLogger(logger, { wideEvent: true })` instead. The tracer module will be removed in a future major version.
 
 Extracts correlation ID, wraps the handler in a route-level span (`METHOD /path`), and annotates it with `http.method`, `http.route`, `http.url`, and `http.status`.
 
@@ -94,19 +112,17 @@ import { Hono } from "hono";
 import { Logger } from "@workers-powertools/logger";
 import { Metrics, MetricUnit, PipelinesBackend } from "@workers-powertools/metrics";
 import type { PipelineBinding } from "@workers-powertools/metrics";
-import { Tracer } from "@workers-powertools/tracer";
 import {
   injectLogger,
   injectMetrics,
-  injectTracer,
   injectIdempotency,
 } from "@workers-powertools/hono";
+import type { WideEventVariables } from "@workers-powertools/hono/logger";
 import { IdempotencyConfig } from "@workers-powertools/idempotency";
 import { KVPersistenceLayer } from "@workers-powertools/idempotency/kv";
 
 const logger = new Logger();
 const metrics = new Metrics();
-const tracer = new Tracer();
 
 let persistenceLayer: KVPersistenceLayer | undefined;
 const idempotencyConfig = new IdempotencyConfig({
@@ -114,10 +130,9 @@ const idempotencyConfig = new IdempotencyConfig({
   expiresAfterSeconds: 3600,
 });
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: WideEventVariables }>();
 
-app.use(injectLogger(logger));
-app.use(injectTracer(tracer));
+app.use(injectLogger(logger, { wideEvent: true }));
 app.use(
   injectMetrics(metrics, {
     backendFactory: (env) =>
@@ -125,7 +140,10 @@ app.use(
   }),
 );
 
-app.get("/hello", (c) => c.json({ message: "hello" }));
+app.get("/hello", (c) => {
+  c.get("wideEvent").set({ greeting: "hello" });
+  return c.json({ message: "hello" });
+});
 
 app.post(
   "/orders",
@@ -135,6 +153,7 @@ app.post(
   },
   async (c) => {
     const body = await c.req.json();
+    c.get("wideEvent").set({ action: "createOrder" });
     return c.json({ status: "created" }, 201);
   },
 );
