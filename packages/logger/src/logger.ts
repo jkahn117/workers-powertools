@@ -292,6 +292,7 @@ export class Logger extends PowertoolsBase {
    * }
    */
   resetContext(): void {
+    this.state.logLevel = this.config.logLevel ?? "INFO";
     this.state.correlationId = undefined;
     this.state.cfProperties = {};
     this.state.contextEnriched = false;
