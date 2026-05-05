@@ -9,3 +9,4 @@ export { PowertoolsBase } from "./powertoolsBase";
 export type { PowertoolsConfig, WorkersContext, CorrelationIdConfig } from "./types";
 export { extractCorrelationId, generateId } from "./correlationId";
 export { extractCfProperties } from "./cfProperties";
+export { captureFetch } from "./captureFetch";

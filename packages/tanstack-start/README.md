@@ -1,6 +1,6 @@
 # @workers-powertools/tanstack-start
 
-TanStack Start middleware adapters for Workers Powertools. This package adapts the existing `logger`, `tracer`, and `metrics` utilities to TanStack Start's request middleware, server function middleware, and Worker request lifecycle.
+TanStack Start middleware adapters for Workers Powertools. This package adapts the existing `logger`, `tracer`, and `metrics` utilities to TanStack Start's request middleware, server function middleware, and Worker request lifecycle. Supports wide events for single-log-per-request observability.
 
 Part of [Workers Powertools](../../README.md) — a developer toolkit for observability and reliability best practices on Cloudflare Workers, inspired by [Powertools for AWS Lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/).
 
@@ -15,7 +15,9 @@ pnpm add @workers-powertools/tanstack-start @tanstack/start-client-core
 You will also need the core packages you want to use:
 
 ```bash
-pnpm add @workers-powertools/logger @workers-powertools/tracer @workers-powertools/metrics
+pnpm add @workers-powertools/logger @workers-powertools/metrics
+# Tracer is optional (deprecated — use wide events instead):
+pnpm add @workers-powertools/tracer
 ```
 
 Subpath exports are available if you want to import only the adapter surface you need:
@@ -42,11 +44,15 @@ import { withStartRequestObservability } from "@workers-powertools/tanstack-star
 
 ## Request Middleware
 
-### `injectLogger({ logger, componentName? })`
+### `injectLogger({ logger, componentName?, wideEvent? })`
 
 Creates a request-scoped child logger, calls `addContext(request, ctx, env)`, and clears temporary keys after the request completes.
 
-### `injectTracer({ tracer, requestSpanName? })`
+When `wideEvent` is enabled, creates a request-scoped `WideEvent` that auto-emits after the handler. Pass `true` for the default message (`METHOD /path`), a string, or a `(request) => string` function.
+
+### `injectTracer({ tracer, requestSpanName? })` *(deprecated)*
+
+> **Deprecated:** Cloudflare Workers has no API for custom spans. Use wide events via `injectLogger({ logger, wideEvent: true })` or `injectObservability({ ..., wideEvent: true })` instead.
 
 Calls `tracer.addContext(request, ctx, env)`, wraps the request in `captureAsync()`, and injects `tracer` and `correlationId` into the downstream Start context.
 
@@ -71,34 +77,32 @@ If `metricsBackendFactory` is not provided, it will look for `env.METRICS_PIPELI
 
 ## Server Function Middleware
 
-### `injectServerFnTracer({ tracer, serverFnSpanName? })`
+### `injectServerFnTracer({ tracer, serverFnSpanName? })` *(deprecated)*
+
+> **Deprecated:** Use wide events instead.
 
 Wraps TanStack Start server functions in a span.
 
 Default span name: `serverFn.<name>`
 
-This is useful when you want server functions to appear as separate traced operations without creating a second request-level metrics lifecycle.
-
 ## Convenience Middleware
 
 ### `injectObservability(options)`
 
-Composes `injectLogger`, `injectTracer`, and optional `injectMetrics` into one request middleware.
+Composes `injectLogger`, optional `injectTracer`, and optional `injectMetrics` into one request middleware. `tracer` is now optional — wide events are the recommended replacement.
 
 ```typescript
 import { injectObservability } from "@workers-powertools/tanstack-start";
 import { Logger } from "@workers-powertools/logger";
-import { Tracer } from "@workers-powertools/tracer";
 import { Metrics } from "@workers-powertools/metrics";
 
 const logger = new Logger({ serviceName: "app" });
-const tracer = new Tracer({ serviceName: "app" });
 const metrics = new Metrics({ namespace: "app", serviceName: "server" });
 
 export const requestObservabilityMiddleware = injectObservability({
   logger,
-  tracer,
   metrics,
+  wideEvent: true,
   componentName: "server",
 });
 ```
@@ -107,29 +111,20 @@ export const requestObservabilityMiddleware = injectObservability({
 
 ```typescript
 import { createStart } from "@tanstack/react-start";
-import {
-  injectObservability,
-  injectServerFnTracer,
-} from "@workers-powertools/tanstack-start";
+import { injectObservability } from "@workers-powertools/tanstack-start";
 import { logger } from "./lib/logger";
-import { tracer } from "./lib/tracer";
 import { metrics } from "./lib/metrics";
 
 export const requestObservabilityMiddleware = injectObservability({
   logger,
-  tracer,
   metrics,
+  wideEvent: true,
   componentName: "server",
-});
-
-export const serverFnObservabilityMiddleware = injectServerFnTracer({
-  tracer,
 });
 
 export const startInstance = createStart(() => {
   return {
     requestMiddleware: [requestObservabilityMiddleware],
-    functionMiddleware: [serverFnObservabilityMiddleware],
   };
 });
 ```
@@ -178,7 +173,7 @@ export default {
 
 ## Suggested Start Context Shape
 
-Expose `env`, `logger`, `tracer`, `metrics`, and `correlationId` through TanStack Start's request context:
+Expose `env`, `logger`, `metrics`, and `correlationId` through TanStack Start's request context (`tracer` is optional/deprecated):
 
 ```typescript
 declare module "@tanstack/react-router" {

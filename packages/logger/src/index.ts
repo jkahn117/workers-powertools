@@ -2,14 +2,17 @@
  * @workers-powertools/logger
  *
  * Structured logging with Workers context enrichment,
- * correlation IDs, log levels, and debug sampling.
+ * correlation IDs, log levels, debug sampling, and wide events.
  */
 
 export { Logger } from "./logger";
+export { WideEvent } from "./wideEvent";
 export type {
   LoggerConfig,
   LogLevel,
   LogEntry,
   RpcContext,
   RpcContextHandle,
+  StructuredErrorInfo,
 } from "./types";
+export type { RedactConfig } from "./redact";

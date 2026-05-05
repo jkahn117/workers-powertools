@@ -6,7 +6,7 @@
  * webhooks, queue messages, and other at-least-once events.
  */
 
-export { makeIdempotent } from "./makeIdempotent";
+export { makeIdempotent, IdempotencyConflictError } from "./makeIdempotent";
 export { IdempotencyConfig } from "./config";
 export type {
   PersistenceLayer,

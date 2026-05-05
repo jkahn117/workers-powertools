@@ -11,7 +11,7 @@ const SIZE_BUDGETS = [
   {
     packageName: "@workers-powertools/logger",
     filePath: "packages/logger/dist/index.js",
-    budgetBytes: 5 * 1024,
+    budgetBytes: 6 * 1024,
   },
   {
     packageName: "@workers-powertools/metrics",

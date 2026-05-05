@@ -1,4 +1,5 @@
 import type { PowertoolsConfig, CorrelationIdConfig } from "@workers-powertools/commons";
+import type { RedactConfig } from "./redact";
 
 /** Supported log levels, ordered by severity. */
 export type LogLevel =
@@ -47,12 +48,39 @@ export interface LoggerConfig extends PowertoolsConfig {
   debugSampleRate?: number;
 
   /**
+   * Two-tier sampling: percentage of requests (0-1) for which non-error
+   * logs (TRACE through WARN) are emitted. ERROR and CRITICAL always
+   * emit regardless of this setting.
+   *
+   * Set to 1 (default) to emit all logs. Set to 0.1 to emit non-error
+   * logs for only 10% of requests while still capturing every error.
+   * @default 1
+   */
+  sampleRate?: number;
+
+  /**
    * When true, buffer logs below the configured level and flush
    * them all if an error occurs during the request. Flushed via
    * ctx.waitUntil to avoid blocking the response.
    * @default false
    */
   logBufferingEnabled?: boolean;
+
+  /**
+   * Maximum number of log entries to keep in the buffer when
+   * `logBufferingEnabled` is true. Once the cap is reached, the
+   * oldest entries are discarded to make room. Set to 0 for
+   * unlimited (not recommended in production).
+   * @default 1000
+   */
+  maxBufferSize?: number;
+
+  /**
+   * PII redaction configuration. When enabled, string values in log entries
+   * are scanned for common PII patterns (credit cards, emails, IPs, JWTs)
+   * and replaced with `[REDACTED_*]` placeholders before output.
+   */
+  redact?: RedactConfig;
 }
 
 /**
@@ -98,6 +126,23 @@ export interface RpcContext {
  */
 export interface RpcContextHandle {
   [Symbol.dispose](): void;
+}
+
+/**
+ * Structured error context for actionable error diagnostics.
+ *
+ * Inspired by evlog's structured errors — attach human-readable
+ * guidance so operators can diagnose issues directly from logs.
+ */
+export interface StructuredErrorInfo {
+  /** The underlying Error object. */
+  error: Error;
+  /** Why the error happened (root cause). */
+  why?: string;
+  /** How to fix or recover from the error. */
+  fix?: string;
+  /** Link to relevant docs, runbook, or dashboard. */
+  link?: string;
 }
 
 /**

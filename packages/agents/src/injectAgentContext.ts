@@ -22,6 +22,9 @@ export interface AgentContextOptions {
    * Tracer instance to enrich. When provided, the correlation ID is set
    * on the tracer so outbound fetch calls made during the RPC method carry
    * the same correlation ID as the log entries.
+   *
+   * @deprecated The tracer module is deprecated. Use `captureFetch()`
+   * from `@workers-powertools/commons` for outbound correlation instead.
    */
   tracer?: Tracer;
 

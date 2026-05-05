@@ -7,7 +7,7 @@ Part of [Workers Powertools](../../README.md) — a developer toolkit for observ
 ## Features
 
 - **Auto-resolved agent context** — extracts agent name and connection ID from `getCurrentAgent()` without requiring `this`
-- **Logger + tracer integration** — enriches both utilities in a single call
+- **Logger + tracer integration** — enriches both utilities in a single call (tracer is now optional/deprecated)
 - **`using`-based cleanup** — automatic context disposal on scope exit, even on throw
 - **Graceful degradation** — works outside agent contexts (e.g., in tests) without errors
 
@@ -22,18 +22,15 @@ pnpm add @workers-powertools/agents
 ```typescript
 import { Agent } from "agents";
 import { Logger } from "@workers-powertools/logger";
-import { Tracer } from "@workers-powertools/tracer";
 import { injectAgentContext } from "@workers-powertools/agents";
 
 const logger = new Logger({ serviceName: "slide-builder" });
-const tracer = new Tracer({ serviceName: "slide-builder" });
 const agentLog = logger.withComponent("SlideBuilder");
 
 export class SlideBuilder extends Agent<Env> {
   async generateSlides(prompt: string, correlationId?: string) {
     using _ctx = injectAgentContext({
       logger: agentLog,
-      tracer,
       operation: "generateSlides",
       correlationId,
     });
@@ -56,5 +53,5 @@ export class SlideBuilder extends Agent<Env> {
 | Export                        | Description                                                        |
 | ----------------------------- | ------------------------------------------------------------------ |
 | `injectAgentContext(options)` | Enrich logger/tracer with agent context; returns disposable handle |
-| `AgentContextOptions`         | Options: `logger`, `tracer`, `operation`, `correlationId`, `extra` |
+| `AgentContextOptions`         | Options: `logger`, `tracer?`, `operation`, `correlationId`, `extra` |
 | `AgentContextHandle`          | Disposable handle with `correlationId` and `Symbol.dispose`        |

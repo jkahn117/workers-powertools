@@ -8,9 +8,11 @@ function getRoutePath(context: APIContext): string {
 /**
  * Astro middleware that injects tracer context for each request.
  *
- * Extracts the correlation ID from the incoming request, wraps the request
- * in a `captureAsync` span, and stores `tracer` + `correlationId` on
- * `context.locals` for downstream server code.
+ * @deprecated The tracer module is deprecated because Cloudflare Workers
+ * does not expose an API for injecting custom spans into the built-in
+ * tracing system. Use `injectLogger` with `wideEvent: true` instead.
+ * For correlation ID propagation on outbound fetch, use `captureFetch`
+ * from `@workers-powertools/commons`.
  */
 export function injectTracer(options: InjectTracerOptions): MiddlewareHandler {
   const { tracer, runtimeEnv, requestSpanName } = options;

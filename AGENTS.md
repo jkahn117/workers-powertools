@@ -55,7 +55,7 @@ Add a size check script to CI that fails if any package exceeds its budget:
 | Package                              | Gzipped size budget |
 | ------------------------------------ | ------------------- |
 | `@workers-powertools/commons`        | 2 KB                |
-| `@workers-powertools/logger`         | 5 KB                |
+| `@workers-powertools/logger`         | 6 KB                |
 | `@workers-powertools/metrics`        | 4 KB                |
 | `@workers-powertools/tracer`         | 5 KB                |
 | `@workers-powertools/idempotency`    | 6 KB                |

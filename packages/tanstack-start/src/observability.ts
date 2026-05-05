@@ -6,12 +6,11 @@ import { injectTracer } from "./tracer";
 import { injectMetrics } from "./metrics";
 
 /**
- * TanStack Start request middleware that combines logger, tracer, and
- * metrics injection in a single middleware.
+ * TanStack Start request middleware that combines logger, optional tracer,
+ * and metrics injection in a single middleware.
  *
- * This is a convenience combinator that delegates to the individual
- * `injectLogger`, `injectTracer`, and `injectMetrics` middlewares.
- * For more granular control, use the individual middlewares directly.
+ * The tracer is deprecated — pass `wideEvent: true` to use wide events
+ * instead of the tracer for request instrumentation.
  */
 export function injectObservability(
   options: InjectObservabilityOptions,
@@ -19,27 +18,32 @@ export function injectObservability(
   const loggerMiddleware = injectLogger({
     logger: options.logger,
     componentName: options.componentName,
+    wideEvent: options.wideEvent,
   });
 
-  const tracerMiddleware = injectTracer({
-    tracer: options.tracer,
-    requestSpanName: options.requestSpanName,
-  });
+  const middlewares: AnyRequestMiddleware[] = [loggerMiddleware];
 
-  const metricsMiddleware = options.metrics
-    ? injectMetrics({
+  if (options.tracer) {
+    middlewares.push(
+      injectTracer({
+        tracer: options.tracer,
+        requestSpanName: options.requestSpanName,
+      }),
+    );
+  }
+
+  if (options.metrics) {
+    middlewares.push(
+      injectMetrics({
         metrics: options.metrics,
         metricsBackendFactory: options.metricsBackendFactory,
         captureHttpMetrics: options.captureHttpMetrics,
-      })
-    : undefined;
+      }),
+    );
+  }
 
   return createMiddleware()
-    .middleware([
-      loggerMiddleware,
-      tracerMiddleware,
-      ...(metricsMiddleware ? [metricsMiddleware] : []),
-    ])
+    .middleware(middlewares)
     .server(async ({ next }) => {
       return await next();
     });

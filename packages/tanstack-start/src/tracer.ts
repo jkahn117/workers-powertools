@@ -8,8 +8,11 @@ import type { InjectTracerOptions, InjectServerFnTracerOptions } from "./types";
 /**
  * TanStack Start request middleware that injects tracer context.
  *
- * Extracts the correlation ID from the incoming request, then wraps
- * the downstream handler in a `captureAsync` span.
+ * @deprecated The tracer module is deprecated because Cloudflare Workers
+ * does not expose an API for injecting custom spans into the built-in
+ * tracing system. Use `injectLogger` with `wideEvent: true` instead.
+ * For correlation ID propagation on outbound fetch, use `captureFetch`
+ * from `@workers-powertools/commons`.
  */
 export function injectTracer(options: InjectTracerOptions): AnyRequestMiddleware {
   const { tracer, requestSpanName } = options;
@@ -50,8 +53,7 @@ export function injectTracer(options: InjectTracerOptions): AnyRequestMiddleware
  * TanStack Start server function middleware that creates a span
  * around each server function call.
  *
- * Reuses the tracer and correlation ID from upstream request middleware
- * when available. Does not create a second metrics backend lifecycle.
+ * @deprecated The tracer module is deprecated. Use wide events instead.
  */
 export function injectServerFnTracer(
   options: InjectServerFnTracerOptions,

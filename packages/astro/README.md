@@ -1,6 +1,6 @@
 # @workers-powertools/astro
 
-Astro middleware adapters for Workers Powertools. This package adapts the existing `logger`, `tracer`, and `metrics` utilities to Astro middleware running on Cloudflare Workers.
+Astro middleware adapters for Workers Powertools. This package adapts the existing `logger`, `tracer`, and `metrics` utilities to Astro middleware running on Cloudflare Workers. Supports wide events for single-log-per-request observability.
 
 Part of [Workers Powertools](../../README.md) — a developer toolkit for observability and reliability best practices on Cloudflare Workers, inspired by [Powertools for AWS Lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/).
 
@@ -13,7 +13,9 @@ pnpm add @workers-powertools/astro astro
 You will also need the core packages you want to use:
 
 ```bash
-pnpm add @workers-powertools/logger @workers-powertools/tracer @workers-powertools/metrics
+pnpm add @workers-powertools/logger @workers-powertools/metrics
+# Tracer is optional (deprecated — use wide events instead):
+pnpm add @workers-powertools/tracer
 ```
 
 Subpath exports are available if you want to import only the adapter surface you need:
@@ -40,12 +42,10 @@ import { Metrics } from "@workers-powertools/metrics";
 import { Tracer } from "@workers-powertools/tracer";
 
 const logger = new Logger({ serviceName: "astro-app" });
-const tracer = new Tracer({ serviceName: "astro-app" });
 const metrics = new Metrics({ namespace: "astro-app", serviceName: "web" });
 
 export const onRequest = sequence(
-  injectLogger({ logger, runtimeEnv: env, componentName: "astro" }),
-  injectTracer({ tracer, runtimeEnv: env }),
+  injectLogger({ logger, runtimeEnv: env, componentName: "astro", wideEvent: true }),
   injectMetrics({ metrics, runtimeEnv: env }),
 );
 ```
@@ -53,7 +53,7 @@ export const onRequest = sequence(
 This middleware will:
 
 - create a request-scoped child logger and store it on `Astro.locals`
-- create a request span and store `tracer` + `correlationId` on `Astro.locals`
+- when `wideEvent: true`, create a request-scoped `WideEvent` on `Astro.locals.wideEvent` that auto-emits after the handler
 - record `request_duration` and `request_count` metrics and flush them via `cfContext.waitUntil()`
 
 ## Convenience Middleware
@@ -66,10 +66,11 @@ import { injectObservability } from "@workers-powertools/astro/observability";
 
 export const onRequest = injectObservability({
   logger,
-  tracer,
   metrics,
+  wideEvent: true,
   runtimeEnv: env,
   componentName: "astro",
+  // tracer is optional (deprecated)
 });
 ```
 
@@ -97,6 +98,7 @@ Then use it inside pages or endpoints:
 ```typescript
 export const GET = async (context) => {
   context.locals.logger?.info("Handling Astro endpoint");
+  context.locals.wideEvent?.set({ route: "/api/data" });
   return new Response("ok");
 };
 ```
