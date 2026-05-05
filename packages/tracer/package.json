@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/tracer",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Correlation IDs and trace enrichment for Cloudflare Workers",
   "license": "MIT",
   "type": "module",

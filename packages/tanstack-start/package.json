@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/tanstack-start",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "TanStack Start middleware adapters for Workers Powertools (logger, metrics, tracer)",
   "license": "MIT",
   "type": "module",
@@ -45,10 +45,10 @@
   },
   "peerDependencies": {
     "@tanstack/start-client-core": ">=1.167.0",
-    "@workers-powertools/commons": ">=0.1.1",
-    "@workers-powertools/logger": ">=0.1.1",
-    "@workers-powertools/metrics": ">=0.3.1",
-    "@workers-powertools/tracer": ">=0.1.1"
+    "@workers-powertools/commons": ">=0.2.0",
+    "@workers-powertools/logger": ">=0.2.0",
+    "@workers-powertools/metrics": ">=0.4.0",
+    "@workers-powertools/tracer": ">=0.2.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

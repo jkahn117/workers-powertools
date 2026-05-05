@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/idempotency",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Exactly-once execution with pluggable persistence for Cloudflare Workers",
   "license": "MIT",
   "type": "module",

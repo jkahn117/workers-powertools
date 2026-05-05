@@ -1,5 +1,18 @@
 # @workers-powertools/astro
 
+## 1.0.0
+
+### Minor Changes
+
+- Add wide events, deprecate tracer, other fixes
+
+### Patch Changes
+
+- Updated dependencies
+  - @workers-powertools/logger@0.2.0
+  - @workers-powertools/metrics@0.4.0
+  - @workers-powertools/tracer@0.2.0
+
 ## 0.2.0
 
 ### Minor Changes

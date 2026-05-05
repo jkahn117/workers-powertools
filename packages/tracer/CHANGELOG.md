@@ -1,5 +1,16 @@
 # @workers-powertools/tracer
 
+## 0.2.0
+
+### Minor Changes
+
+- Add wide events, deprecate tracer, other fixes
+
+### Patch Changes
+
+- Updated dependencies
+  - @workers-powertools/commons@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes
