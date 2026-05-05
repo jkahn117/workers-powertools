@@ -1,6 +1,11 @@
 # @workers-powertools/tanstack-start
 
-## 1.0.0
+## 0.2.0
+
+### Minor Changes
+
+- Tracer is now optional in observability middleware
+- Wide events support via logger
 
 ### Patch Changes
 

@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/tanstack-start",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "TanStack Start middleware adapters for Workers Powertools (logger, metrics, tracer)",
   "license": "MIT",
   "type": "module",

@@ -1,10 +1,11 @@
 # @workers-powertools/agents
 
-## 1.0.0
+## 0.2.0
 
 ### Minor Changes
 
-- Add wide events, deprecate tracer, other fixes
+- Tracer is now optional in `injectAgentContext()`
+- Wide events support via logger
 
 ### Patch Changes
 
@@ -21,7 +22,7 @@
   - @workers-powertools/logger@0.1.1
   - @workers-powertools/tracer@0.1.1
 
-## 1.0.0
+## 0.1.0
 
 ### Minor Changes
 

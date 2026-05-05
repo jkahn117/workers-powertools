@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/astro",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "description": "Astro middleware adapters for Workers Powertools (logger, metrics, tracer)",
   "license": "MIT",
   "type": "module",
