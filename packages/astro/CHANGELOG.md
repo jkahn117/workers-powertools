@@ -1,10 +1,11 @@
 # @workers-powertools/astro
 
-## 1.0.0
+## 0.3.0
 
 ### Minor Changes
 
-- Add wide events, deprecate tracer, other fixes
+- Wide event middleware support via `wideEvent` option on `injectLogger`
+- Tracer is now optional in observability middleware
 
 ### Patch Changes
 

@@ -1,6 +1,12 @@
 # @workers-powertools/hono
 
-## 1.0.0
+## 0.4.0
+
+### Minor Changes
+
+- Wide event middleware support via `wideEvent` option on `injectLogger`
+- Added `resetContext()` call before `addContext()` to prevent state leak between requests
+- Removed explicit `MiddlewareHandler` return type annotation (now inferred from `createMiddleware`)
 
 ### Patch Changes
 

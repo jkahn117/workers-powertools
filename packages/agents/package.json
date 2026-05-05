@@ -1,6 +1,6 @@
 {
   "name": "@workers-powertools/agents",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Cloudflare Agents SDK integration for Workers Powertools — instrumentation for Agent RPC methods, DO lifecycle, and WebSocket connections",
   "license": "MIT",
   "type": "module",
