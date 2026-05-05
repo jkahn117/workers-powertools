@@ -1,5 +1,16 @@
 # hono-worker
 
+## 0.1.0
+
+### Minor Changes
+
+- Bug fixes for middleware
+
+### Patch Changes
+
+- Updated dependencies
+  - @workers-powertools/hono@0.3.0
+
 ## 0.0.5
 
 ### Patch Changes

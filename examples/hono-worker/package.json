@@ -1,6 +1,6 @@
 {
   "name": "hono-worker",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,17 +11,18 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@workers-powertools/hono": "workspace:*",
+    "@workers-powertools/idempotency": "workspace:*",
     "@workers-powertools/logger": "workspace:*",
     "@workers-powertools/metrics": "workspace:*",
     "@workers-powertools/tracer": "workspace:*",
-    "@workers-powertools/idempotency": "workspace:*",
-    "@workers-powertools/hono": "workspace:*",
-    "hono": "^4.12.12"
+    "hono": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
+    "@types/node": "^25.6.0",
     "esbuild": "^0.28.0",
     "vitest": "catalog:",
-    "wrangler": "^4.81.0"
+    "wrangler": "^4.87.0"
   }
 }

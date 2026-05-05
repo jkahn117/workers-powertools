@@ -1,5 +1,11 @@
 # tanstack-start-worker
 
+## 0.1.0
+
+### Minor Changes
+
+- Bug fixes for middleware
+
 ## 0.0.2
 
 ### Patch Changes
