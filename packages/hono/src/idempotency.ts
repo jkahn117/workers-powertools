@@ -1,5 +1,4 @@
 import { createMiddleware } from "hono/factory";
-import type { MiddlewareHandler } from "hono";
 import { makeIdempotent, IdempotencyConfig } from "@workers-powertools/idempotency";
 import type { PersistenceLayer } from "@workers-powertools/idempotency";
 
@@ -29,7 +28,7 @@ export interface InjectIdempotencyOptions {
  *
  * @param options - Idempotency configuration, persistence layer, and optional header name.
  */
-export function injectIdempotency(options: InjectIdempotencyOptions): MiddlewareHandler {
+export function injectIdempotency(options: InjectIdempotencyOptions) {
   const { config, headerName = "idempotency-key" } = options;
 
   return createMiddleware(async (c, next) => {

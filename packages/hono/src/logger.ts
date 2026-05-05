@@ -1,5 +1,4 @@
 import { createMiddleware } from "hono/factory";
-import type { MiddlewareHandler } from "hono";
 import type { Logger, WideEvent } from "@workers-powertools/logger";
 
 export interface InjectLoggerOptions {
@@ -37,7 +36,7 @@ export interface WideEventVariables {
 export function injectLogger(
   logger: Logger,
   options?: InjectLoggerOptions,
-): MiddlewareHandler {
+) {
   return createMiddleware(async (c, next) => {
     logger.resetContext();
     logger.addContext(

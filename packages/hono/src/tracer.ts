@@ -1,5 +1,4 @@
 import { createMiddleware } from "hono/factory";
-import type { MiddlewareHandler } from "hono";
 import type { Tracer } from "@workers-powertools/tracer";
 
 /**
@@ -15,7 +14,7 @@ import type { Tracer } from "@workers-powertools/tracer";
  *
  * @param tracer - A configured Tracer instance.
  */
-export function injectTracer(tracer: Tracer): MiddlewareHandler {
+export function injectTracer(tracer: Tracer) {
   return createMiddleware(async (c, next) => {
     tracer.addContext(
       c.req.raw,

@@ -1,5 +1,4 @@
 import { createMiddleware } from "hono/factory";
-import type { MiddlewareHandler } from "hono";
 import type { Metrics, MetricsBackend } from "@workers-powertools/metrics";
 import { MetricUnit } from "@workers-powertools/metrics";
 import type { PipelineBinding } from "@workers-powertools/metrics/pipelines";
@@ -59,7 +58,7 @@ export interface InjectMetricsOptions {
 export function injectMetrics(
   metrics: Metrics,
   options?: InjectMetricsOptions,
-): MiddlewareHandler {
+) {
   return createMiddleware(async (c, next) => {
     const env = c.env as Record<string, unknown>;
 
